@@ -241,41 +241,85 @@ class VoiceControl:
             self.audio_queue.put(error_msg)
             print(error_msg)
 
-    def cleanup_resources(self):
-        """增强型资源清理"""
-        print("正在清理音频资源...")
-        self.running = False
-        
-        # 停止音频流
+def cleanup_resources(self):
+    """增强型资源清理（带调试日志）"""
+    print("[DEBUG] 开始清理资源...")
+    
+    # 设置运行状态为False
+    print("[DEBUG] 设置running=False")
+    self.running = False
+    
+    # 清空音频队列防止阻塞
+    print("[DEBUG] 清空音频队列")
+    while not self.audio_queue.empty():
+        try:
+            self.audio_queue.get_nowait()
+        except queue.Empty:
+            break
+            
+    # 停止音频流（分步骤记录）
+    try:
+        print("[DEBUG] 正在停止音频流...")
         if self.audio_stream.is_active():
-            try:
-                self.audio_stream.stop_stream()
-            except Exception as e:
-                print(f"停止音频流时出错: {str(e)}")
-        
-        # 关闭音频流
+            self.audio_stream.stop_stream()
+            print("[DEBUG] 音频流已停止")
+        else:
+            print("[DEBUG] 音频流未处于活动状态")
+    except Exception as e:
+        print(f"[ERROR] 停止音频流时出错: {str(e)}")
+    
+    # 关闭音频流
+    try:
+        print("[DEBUG] 正在关闭音频流...")
+        self.audio_stream.close()
+        print("[DEBUG] 音频流已关闭")
+    except Exception as e:
+        print(f"[ERROR] 关闭音频流时出错: {str(e)}")
+    
+    # 终止PyAudio实例
+    try:
+        print("[DEBUG] 正在终止PyAudio...")
+        self.audio_interface.terminate()
+        print("[DEBUG] PyAudio已终止")
+    except Exception as e:
+        print(f"[ERROR] 终止PyAudio时出错: {str(e)}")
+    
+    # 停止TTS引擎
+    try:
+        print("[DEBUG] 正在停止TTS引擎...")
+        self.tts_engine.stop()
+        print("[DEBUG] TTS引擎已停止")
+    except Exception as e:
+        print(f"[ERROR] 停止TTS引擎时出错: {str(e)}")
+    
+    # 停止运动控制
+    try:
+        print("[DEBUG] 发送最终停止指令...")
+        self.sport_client.StopMove()
+        print("[DEBUG] 运动控制已停止")
+    except Exception as e:
+        print(f"[ERROR] 停止运动控制时出错: {str(e)}")
+    
+    # 额外安全措施：强制终止可能卡住的线程
+    print("[DEBUG] 检查线程状态：")
+    for t in threading.enumerate():
+        if t != threading.main_thread():
+            print(f"[THREAD] {t.name} (alive={t.is_alive()})")
+    
+    print("[DEBUG] 资源清理完成")
+
+def audio_callback(self, in_data, frame_count, time_info, status):
+    """带状态检查的音频回调"""
+    if self.running:
         try:
-            self.audio_stream.close()
-        except Exception as e:
-            print(f"关闭音频流时出错: {str(e)}")
-        
-        # 终止PyAudio
-        try:
-            self.audio_interface.terminate()
-        except Exception as e:
-            print(f"终止PyAudio时出错: {str(e)}")
-        
-        # 停止TTS引擎
-        try:
-            self.tts_engine.stop()
-        except Exception as e:
-            print(f"停止TTS引擎时出错: {str(e)}")
-        
-        # 停止运动控制
-        try:
-            self.sport_client.StopMove()
-        except Exception as e:
-            print(f"停止运动控制时出错: {str(e)}")
+            self.audio_queue.put(in_data, timeout=0.1)
+            return (in_data, pyaudio.paContinue)
+        except queue.Full:
+            print("[WARNING] 音频队列已满，丢弃数据")
+            return (None, pyaudio.paContinue)
+    else:
+        print("[DEBUG] 音频回调已停止")
+        return (None, pyaudio.paComplete)
 
     def run(self):
         """增强型主运行逻辑"""
@@ -307,11 +351,19 @@ class VoiceControl:
                     if not self.startup_confirmed and not self.startup_timer.is_alive():
                         self.running = False
         finally:
-            # 确保所有资源清理
+            start_cleanup_time = time.time()
+            print(f"[TIMING] 开始清理时间戳：{start_cleanup_time}")
             self.cleanup_resources()
-            if self.startup_timer:
-                self.startup_timer.cancel()
-            print("资源清理完成")
+            
+            # 添加清理超时监控
+            timeout = 5  # 最多等待5秒
+            while threading.active_count() > 1:
+                if time.time() - start_cleanup_time > timeout:
+                    print("[WARNING] 清理超时，强制退出！")
+                    os._exit(1)
+                time.sleep(0.1)
+            
+            print(f"[TIMING] 总清理耗时：{time.time()-start_cleanup_time:.2f}秒")
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
