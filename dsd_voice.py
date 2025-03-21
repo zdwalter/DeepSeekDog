@@ -39,7 +39,7 @@ class VoiceControl:
         self.running = True
         self.startup_confirmed = False
         self.startup_timer = None
-        self.debug_mode = True
+        self.debug_mode = True #默认启动，TODO：修改成从配置读取
         
         # 网络状态
         self.current_network_status = self.check_network()
