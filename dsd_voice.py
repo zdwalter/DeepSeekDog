@@ -33,6 +33,8 @@ class VoiceControl:
         # 分离消息队列
         self.tts_queue = queue.Queue()  # 用于TTS文本消息
         self.asr_queue = queue.Queue()  # 用于音频原始数据
+
+
         
         # 状态控制
         self.running = True
@@ -304,6 +306,15 @@ class VoiceControl:
         
         print("[DEBUG] 资源清理完成")
 
+    def startup_timeout(self):
+        """启动确认超时处理"""
+        if not self.startup_confirmed:
+            print("[DEBUG] 启动确认超时")
+            self.tts_queue.put("启动确认超时，程序即将退出")
+            time.sleep(2)  # 确保语音提示完成
+            self.running = False
+            self.tts_running = False
+            
     def run(self):
         """主运行逻辑"""
         try:
@@ -334,6 +345,10 @@ class VoiceControl:
                     if not self.startup_confirmed and not self.startup_timer.is_alive():
                         self.running = False
         finally:
+            # 确保取消定时器
+            if self.startup_timer and self.startup_timer.is_alive():
+                self.startup_timer.cancel()
+                
             self.cleanup_resources()
             print("程序已安全退出")
 
