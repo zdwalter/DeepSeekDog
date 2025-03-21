@@ -10,7 +10,7 @@ import speech_recognition as sr
 import pyttsx3
 from vosk import Model, KaldiRecognizer
 import pyaudio
-import os  # 添加缺失的os模块导入
+import os
 from unitree_sdk2py.core.channel import ChannelFactoryInitialize
 from unitree_sdk2py.go2.sport.sport_client import SportClient
 
@@ -19,6 +19,11 @@ class VoiceControl:
         # 初始化信号处理
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
+        
+        # 初始化队列系统（修复cmd_queue缺失问题）
+        self.cmd_queue = queue.Queue()    # 命令处理队列
+        self.tts_queue = queue.Queue()     # TTS文本队列
+        self.asr_queue = queue.Queue()     # ASR音频数据队列
         
         # 初始化TTS引擎
         self.tts_engine = pyttsx3.init()
@@ -29,12 +34,6 @@ class VoiceControl:
         # 设置引擎回调
         self.tts_engine.connect('started-utterance', self.on_start)
         self.tts_engine.connect('finished-utterance', self.on_end)
-        
-        # 分离消息队列
-        self.tts_queue = queue.Queue()  # 用于TTS文本消息
-        self.asr_queue = queue.Queue()  # 用于音频原始数据
-
-
         
         # 状态控制
         self.running = True
@@ -164,7 +163,7 @@ class VoiceControl:
                 try:
                     audio = self.online_recognizer.listen(source, timeout=3)
                     text = self.online_recognizer.recognize_google(audio, language='zh-CN')
-                    self.cmd_queue.put(text)
+                    self.cmd_queue.put(text)  # 修复：使用正确的命令队列
                 except (sr.UnknownValueError, sr.WaitTimeoutError):
                     continue
                 except sr.RequestError:
@@ -181,7 +180,7 @@ class VoiceControl:
                 try:
                     text = json.loads(result)["text"]
                     if text:
-                        self.cmd_queue.put(text)
+                        self.cmd_queue.put(text)  # 修复：使用正确的命令队列
                 except json.JSONDecodeError:
                     continue
 
