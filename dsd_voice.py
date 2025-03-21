@@ -111,7 +111,7 @@ class VoiceControl:
     def check_network(self):
         """增强型网络检测"""
         test_servers = [
-            ("www.google.com", 80),
+            ("www.bing.com", 80),
             ("www.baidu.com", 80),
             ("8.8.8.8", 53)
         ]
