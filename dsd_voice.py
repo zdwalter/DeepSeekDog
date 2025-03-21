@@ -2,9 +2,8 @@ import time
 import sys
 import threading
 import queue
-import json  # 添加缺失的导入
-
 import socket
+import json
 import speech_recognition as sr
 import pyttsx3
 from vosk import Model, KaldiRecognizer
@@ -17,6 +16,10 @@ class VoiceControl:
         # 多线程通信队列
         self.cmd_queue = queue.Queue()
         self.audio_queue = queue.Queue()
+        
+        # 启动确认相关
+        self.startup_confirmed = False
+        self.startup_timer = None
         
         # 网络状态检测
         self.online_mode = self.check_network()
@@ -33,6 +36,7 @@ class VoiceControl:
         self.running = True
         self.debug_mode = False
         self.command_map = {
+            "确认模式": -3,
             "停": 6, "stop": 6, "暂停": 6,
             "前进": 3, "forward": 3,
             "后退": 3, "back": 3,
@@ -53,7 +57,7 @@ class VoiceControl:
         self.tts_engine = pyttsx3.init()
         
         # 离线ASR模型（需要提前下载模型文件）
-        self.vosk_model = Model(lang="cn")  # 中文模型
+        self.vosk_model = Model(lang="cn")
         
         # 在线识别引擎
         self.online_recognizer = sr.Recognizer()
@@ -69,7 +73,7 @@ class VoiceControl:
         )
 
     def check_network(self):
-        """检测网络连接状态"""
+        """检测网络连接状态（使用Bing测试）"""
         try:
             socket.create_connection(("www.bing.com", 80), timeout=3)
             return True
@@ -108,9 +112,12 @@ class VoiceControl:
             data = self.audio_stream.read(4000)
             if rec.AcceptWaveform(data):
                 result = rec.Result()
-                text = json.loads(result)["text"]
-                if text:
-                    self.cmd_queue.put(text)
+                try:
+                    text = json.loads(result)["text"]
+                    if text:
+                        self.cmd_queue.put(text)
+                except json.JSONDecodeError:
+                    continue
 
     def network_monitor_thread(self):
         """网络状态监控线程"""
@@ -122,10 +129,28 @@ class VoiceControl:
                 self.audio_queue.put(f"网络状态已切换至{status}模式")
             time.sleep(10)
 
+    def startup_timeout(self):
+        """启动确认超时处理"""
+        if not self.startup_confirmed:
+            self.audio_queue.put("启动确认超时，程序即将退出")
+            time.sleep(2)
+            self.running = False
+
     def process_command(self, command):
-        """命令处理逻辑"""
+        """处理语音命令"""
         cmd = command.lower()
         
+        # 启动确认阶段处理
+        if not self.startup_confirmed:
+            if "确认模式" in cmd:
+                self.startup_confirmed = True
+                if self.startup_timer:
+                    self.startup_timer.cancel()
+                self.audio_queue.put("启动确认成功，进入操作模式")
+                return
+            else:
+                return
+
         # 模式切换命令
         if "调试" in cmd:
             self.debug_mode = True
@@ -156,7 +181,6 @@ class VoiceControl:
     def execute_action(self, action_id, raw_cmd):
         """执行具体动作"""
         try:
-            # 运动控制逻辑
             if action_id == 6:
                 self.sport_client.StopMove()
             elif action_id == 3:
@@ -186,6 +210,11 @@ class VoiceControl:
 
     def run(self):
         """主运行逻辑"""
+        # 启动确认阶段
+        self.audio_queue.put("请说'确认模式'以启动程序，您有10秒时间")
+        self.startup_timer = threading.Timer(10.0, self.startup_timeout)
+        self.startup_timer.start()
+
         # 启动线程
         threads = [
             threading.Thread(target=self.tts_thread),
@@ -203,14 +232,20 @@ class VoiceControl:
             t.start()
 
         # 主处理循环
-        self.audio_queue.put("语音控制系统已启动")
-        while self.running:
-            try:
-                command = self.cmd_queue.get(timeout=1)
-                if command:
-                    self.process_command(command)
-            except queue.Empty:
-                continue
+        try:
+            while self.running:
+                try:
+                    command = self.cmd_queue.get(timeout=1)
+                    if command:
+                        self.process_command(command)
+                except queue.Empty:
+                    if not self.startup_confirmed and not self.startup_timer.is_alive():
+                        self.running = False
+        finally:
+            self.sport_client.StopMove()
+            if self.startup_timer:
+                self.startup_timer.cancel()
+            self.audio_queue.put("系统已关闭")
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
@@ -219,5 +254,8 @@ if __name__ == "__main__":
 
     ChannelFactoryInitialize(0, sys.argv[1])
     
-    controller = VoiceControl()
-    controller.run()
+    try:
+        controller = VoiceControl()
+        controller.run()
+    except KeyboardInterrupt:
+        print("程序被手动终止")
