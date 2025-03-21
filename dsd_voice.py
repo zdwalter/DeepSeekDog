@@ -72,6 +72,10 @@ class VoiceControl:
             # 离线ASR模型
             self.vosk_model = Model(lang="cn")
             
+            # 初始化在线识别设备（新增麦克风初始化）
+            self.online_recognizer = sr.Recognizer()
+            self.microphone = sr.Microphone()  # 添加缺失的麦克风初始化
+            
             # 音频输入流（增加异常处理）
             self.audio_stream = self.audio_interface.open(
                 format=pyaudio.paInt16,
