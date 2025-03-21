@@ -71,7 +71,7 @@ class VoiceControl:
     def check_network(self):
         """检测网络连接状态"""
         try:
-            socket.create_connection(("www.google.com", 80), timeout=3)
+            socket.create_connection(("www.bing.com", 80), timeout=3)
             return True
         except OSError:
             return False
