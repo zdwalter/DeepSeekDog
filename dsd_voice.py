@@ -4,6 +4,8 @@ import threading
 import queue
 import socket
 import json
+import re
+import signal
 import speech_recognition as sr
 import pyttsx3
 from vosk import Model, KaldiRecognizer
@@ -13,15 +15,24 @@ from unitree_sdk2py.go2.sport.sport_client import SportClient
 
 class VoiceControl:
     def __init__(self):
+        # 初始化信号处理
+        signal.signal(signal.SIGINT, self.signal_handler)
+        signal.signal(signal.SIGTERM, self.signal_handler)
+        
         # 多线程通信队列
         self.cmd_queue = queue.Queue()
         self.audio_queue = queue.Queue()
         
-        # 启动确认相关
+        # 状态控制
+        self.running = True
         self.startup_confirmed = False
         self.startup_timer = None
+        self.debug_mode = False
         
-        # 语音模块初始化
+        # 网络状态
+        self.current_network_status = self.check_network()
+        
+        # 音频资源初始化
         self.audio_interface = pyaudio.PyAudio()
         self.init_voice_engine()
         
@@ -29,11 +40,8 @@ class VoiceControl:
         self.sport_client = SportClient()
         self.sport_client.SetTimeout(10.0)
         self.sport_client.Init()
-        
-        # 控制参数
-        self.running = True
-        self.debug_mode = False
-        self.current_network_status = self.check_network()
+
+        # 命令映射表（正则表达式优化）
         self.command_map = {
             r"确认模式$": -3,
             r"停(止|下)?$": 6, r"stop$": 6, 
@@ -50,8 +58,13 @@ class VoiceControl:
             r"退出$": 0
         }
 
+    def signal_handler(self, signum, frame):
+        """信号处理函数"""
+        self.running = False
+        print("\n接收到终止信号，正在清理资源...")
+
     def init_voice_engine(self):
-        """初始化语音引擎"""
+        """增强型语音引擎初始化"""
         try:
             # TTS引擎
             self.tts_engine = pyttsx3.init()
@@ -59,27 +72,28 @@ class VoiceControl:
             # 离线ASR模型
             self.vosk_model = Model(lang="cn")
             
-            # 在线识别引擎
-            self.online_recognizer = sr.Recognizer()
-            self.microphone = sr.Microphone()
-            
-            # 音频输入流
+            # 音频输入流（增加异常处理）
             self.audio_stream = self.audio_interface.open(
                 format=pyaudio.paInt16,
                 channels=1,
                 rate=16000,
                 input=True,
-                frames_per_buffer=8000,
-                stream_callback=self.audio_callback
+                frames_per_buffer=2048,
+                stream_callback=self.audio_callback,
+                start=False
             )
+            self.audio_stream.start_stream()
         except Exception as e:
             self.cleanup_resources()
             raise RuntimeError(f"语音引擎初始化失败: {str(e)}")
 
     def audio_callback(self, in_data, frame_count, time_info, status):
-        """音频采集回调函数"""
-        self.audio_queue.put(in_data)
-        return (None, pyaudio.paContinue)
+        """增强型音频回调"""
+        if self.running:
+            self.audio_queue.put(in_data)
+            return (in_data, pyaudio.paContinue)
+        else:
+            return (None, pyaudio.paComplete)
 
     def check_network(self):
         """增强型网络检测"""
@@ -224,22 +238,50 @@ class VoiceControl:
             print(error_msg)
 
     def cleanup_resources(self):
-        """资源清理"""
+        """增强型资源清理"""
+        print("正在清理音频资源...")
+        self.running = False
+        
+        # 停止音频流
         if self.audio_stream.is_active():
-            self.audio_stream.stop_stream()
-        self.audio_stream.close()
-        self.audio_interface.terminate()
-        self.tts_engine.stop()
+            try:
+                self.audio_stream.stop_stream()
+            except Exception as e:
+                print(f"停止音频流时出错: {str(e)}")
+        
+        # 关闭音频流
+        try:
+            self.audio_stream.close()
+        except Exception as e:
+            print(f"关闭音频流时出错: {str(e)}")
+        
+        # 终止PyAudio
+        try:
+            self.audio_interface.terminate()
+        except Exception as e:
+            print(f"终止PyAudio时出错: {str(e)}")
+        
+        # 停止TTS引擎
+        try:
+            self.tts_engine.stop()
+        except Exception as e:
+            print(f"停止TTS引擎时出错: {str(e)}")
+        
+        # 停止运动控制
+        try:
+            self.sport_client.StopMove()
+        except Exception as e:
+            print(f"停止运动控制时出错: {str(e)}")
 
     def run(self):
-        """主运行逻辑"""
+        """增强型主运行逻辑"""
         try:
             # 启动确认阶段
             self.audio_queue.put("请说'确认模式'以启动程序，您有10秒时间")
             self.startup_timer = threading.Timer(10.0, self.startup_timeout)
             self.startup_timer.start()
 
-            # 启动线程
+            # 启动工作线程
             threads = [
                 threading.Thread(target=self.tts_thread),
                 threading.Thread(target=self.network_monitor),
@@ -254,18 +296,18 @@ class VoiceControl:
             # 主处理循环
             while self.running:
                 try:
-                    command = self.cmd_queue.get(timeout=1)
+                    command = self.cmd_queue.get(timeout=0.5)
                     if command:
                         self.process_command(command)
                 except queue.Empty:
                     if not self.startup_confirmed and not self.startup_timer.is_alive():
                         self.running = False
         finally:
+            # 确保所有资源清理
             self.cleanup_resources()
-            self.sport_client.StopMove()
             if self.startup_timer:
                 self.startup_timer.cancel()
-            self.audio_queue.put("系统已关闭")
+            print("资源清理完成")
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
@@ -279,5 +321,5 @@ if __name__ == "__main__":
         controller.run()
     except Exception as e:
         print(f"系统错误: {str(e)}")
-    except KeyboardInterrupt:
-        print("程序被手动终止")
+    finally:
+        print("程序已安全退出")
