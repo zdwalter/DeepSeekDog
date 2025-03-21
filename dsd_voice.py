@@ -19,6 +19,15 @@ class VoiceControl:
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
         
+        # 初始化TTS引擎
+        self.tts_engine = pyttsx3.init()
+        self.tts_lock = threading.Lock()  # 新增线程锁
+        self.active_utterance = None      # 跟踪当前语音片段
+
+        # 设置引擎回调
+        self.tts_engine.connect('started-utterance', self.on_start)
+        self.tts_engine.connect('finished-utterance', self.on_end)
+        
         # 多线程通信队列
         self.cmd_queue = queue.Queue()
         self.audio_queue = queue.Queue()
@@ -114,14 +123,37 @@ class VoiceControl:
                 continue
         return False
 
+    def on_start(self, name):
+        """语音开始回调"""
+        with self.tts_lock:
+            self.active_utterance = name
+            
+    def on_end(self, name, completed):
+        """语音结束回调"""
+        with self.tts_lock:
+            self.active_utterance = None
+            
     def tts_thread(self):
-        """语音合成线程"""
+        """增强型TTS线程"""
         while self.running:
             try:
-                text = self.audio_queue.get(timeout=1)
-                if text:
-                    self.tts_engine.say(text)
-                    self.tts_engine.runAndWait()
+                text = self.audio_queue.get(timeout=0.3)  # 更短的超时时间
+                if text and self.running:
+                    # 生成唯一ID用于跟踪
+                    utterance_id = str(hash(text + str(time.time())))
+                    
+                    with self.tts_lock:
+                        self.tts_engine.say(text, utterance_id)
+                        # 启动异步事件循环
+                        self.tts_engine.startLoop(False)
+                        
+                        # 保持循环直到语音完成或停止信号
+                        while self.running and self.active_utterance == utterance_id:
+                            self.tts_engine.iterate()
+                            time.sleep(0.1)
+                            
+                        self.tts_engine.endLoop()
+
             except queue.Empty:
                 continue
             except Exception as e:
@@ -240,7 +272,9 @@ class VoiceControl:
             error_msg = f"执行出错：{str(e)}"
             self.audio_queue.put(error_msg)
             print(error_msg)
+            
 
+            
     def cleanup_resources(self):
         """增强型资源清理（带调试日志）"""
         print("[DEBUG] 开始清理资源...")
@@ -285,10 +319,23 @@ class VoiceControl:
             print(f"[ERROR] 终止PyAudio时出错: {str(e)}")
         
         # 停止TTS引擎
+        """增强型资源清理"""
+        print("[DEBUG] 正在强制停止TTS引擎...")
         try:
-            print("[DEBUG] 正在停止TTS引擎...")
-            self.tts_engine.stop()
-            print("[DEBUG] TTS引擎已停止")
+            # 停止当前语音播放
+            with self.tts_lock:
+                if self.active_utterance:
+                    self.tts_engine.stop()
+                    # 等待最多1秒
+                    start = time.time()
+                    while self.active_utterance and (time.time() - start) < 1:
+                        time.sleep(0.1)
+                    
+            # 彻底停止事件循环
+            if self.tts_engine._loop.is_alive():
+                self.tts_engine.endLoop()
+                
+            print("[DEBUG] TTS引擎已强制停止")
         except Exception as e:
             print(f"[ERROR] 停止TTS引擎时出错: {str(e)}")
         
