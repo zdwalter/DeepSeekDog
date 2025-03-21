@@ -21,8 +21,9 @@ class VoiceControl:
         
         # 初始化TTS引擎
         self.tts_engine = pyttsx3.init()
-        self.tts_lock = threading.Lock()  # 新增线程锁
-        self.active_utterance = None      # 跟踪当前语音片段
+        self.tts_lock = threading.Lock()
+        self.active_utterance = None
+        self.tts_running = True  # 新增TTS运行状态标志
 
         # 设置引擎回调
         self.tts_engine.connect('started-utterance', self.on_start)
@@ -50,7 +51,7 @@ class VoiceControl:
         self.sport_client.SetTimeout(10.0)
         self.sport_client.Init()
 
-        # 命令映射表（正则表达式优化）
+        # 命令映射表
         self.command_map = {
             r"确认模式$": -3,
             r"停(止|下)?$": 6, r"stop$": 6, 
@@ -70,6 +71,7 @@ class VoiceControl:
     def signal_handler(self, signum, frame):
         """信号处理函数"""
         self.running = False
+        self.tts_running = False  # 新增TTS停止标志
         print("\n接收到终止信号，正在清理资源...")
 
     def init_voice_engine(self):
@@ -134,23 +136,26 @@ class VoiceControl:
             self.active_utterance = None
             
     def tts_thread(self):
-        """增强型TTS线程"""
-        while self.running:
+        """改进的TTS线程"""
+        while self.tts_running:  # 使用独立运行标志
             try:
-                text = self.audio_queue.get(timeout=0.3)  # 更短的超时时间
-                if text and self.running:
-                    # 生成唯一ID用于跟踪
+                text = self.audio_queue.get(timeout=0.3)
+                if text and self.tts_running:
                     utterance_id = str(hash(text + str(time.time())))
                     
                     with self.tts_lock:
+                        if not self.tts_running:
+                            break
                         self.tts_engine.say(text, utterance_id)
-                        # 启动异步事件循环
                         self.tts_engine.startLoop(False)
                         
-                        # 保持循环直到语音完成或停止信号
-                        while self.running and self.active_utterance == utterance_id:
+                        # 改进的退出检查
+                        while self.tts_running and self.active_utterance == utterance_id:
                             self.tts_engine.iterate()
                             time.sleep(0.1)
+                            if not self.tts_running:
+                                self.tts_engine.endLoop()
+                                break
                             
                         self.tts_engine.endLoop()
 
@@ -276,12 +281,26 @@ class VoiceControl:
 
             
     def cleanup_resources(self):
-        """增强型资源清理（带调试日志）"""
+        """改进的资源清理（重点修复TTS停止问题）"""
         print("[DEBUG] 开始清理资源...")
-        
-        # 设置运行状态为False
-        print("[DEBUG] 设置running=False")
         self.running = False
+        self.tts_running = False  # 确保TTS线程退出
+        
+        # 强制停止TTS引擎
+        print("[DEBUG] 强制停止TTS引擎...")
+        try:
+            with self.tts_lock:
+                if self.active_utterance:
+                    self.tts_engine.stop()
+                    # 快速清空事件队列
+                    while self.tts_engine._loop.is_alive():
+                        self.tts_engine.endLoop()
+                        time.sleep(0.1)
+            # 彻底断开引擎
+            self.tts_engine.disconnect()
+        except Exception as e:
+            print(f"[ERROR] 停止TTS引擎时出错: {str(e)}")
+
         
         # 清空音频队列防止阻塞
         print("[DEBUG] 清空音频队列")
@@ -318,26 +337,6 @@ class VoiceControl:
         except Exception as e:
             print(f"[ERROR] 终止PyAudio时出错: {str(e)}")
         
-        # 停止TTS引擎
-        """增强型资源清理"""
-        print("[DEBUG] 正在强制停止TTS引擎...")
-        try:
-            # 停止当前语音播放
-            with self.tts_lock:
-                if self.active_utterance:
-                    self.tts_engine.stop()
-                    # 等待最多1秒
-                    start = time.time()
-                    while self.active_utterance and (time.time() - start) < 1:
-                        time.sleep(0.1)
-                    
-            # 彻底停止事件循环
-            if self.tts_engine._loop.is_alive():
-                self.tts_engine.endLoop()
-                
-            print("[DEBUG] TTS引擎已强制停止")
-        except Exception as e:
-            print(f"[ERROR] 停止TTS引擎时出错: {str(e)}")
         
         # 停止运动控制
         try:
