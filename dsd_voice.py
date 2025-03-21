@@ -2,6 +2,8 @@ import time
 import sys
 import threading
 import queue
+import json  # 添加缺失的导入
+
 import socket
 import speech_recognition as sr
 import pyttsx3
