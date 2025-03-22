@@ -48,9 +48,14 @@ class VoiceControl:
         self.sport_client.SetTimeout(10.0)
         self.sport_client.Init()
 
-        self.sport_client.StandDown()
-        time.sleep(2)
-        self.sport_client.StandUp()
+        if 1:
+            self.sport_client.StandDown()
+            time.sleep(2)
+            self.sport_client.StandUp()
+            time.sleep(2)
+            self.sport_client.Move(0.3, 0, 0)
+            time.sleep(2)
+            self.sport_client.Move(-0.3, 0, 0)
         
         # 命令映射表
         self.command_map = {
