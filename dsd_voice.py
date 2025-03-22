@@ -7,10 +7,11 @@ import json
 import re
 import signal
 import speech_recognition as sr
-import pyttsx3
+import edge_tts
+import asyncio
+import subprocess
 from vosk import Model, KaldiRecognizer
 import pyaudio
-import os
 from unitree_sdk2py.core.channel import ChannelFactoryInitialize
 from unitree_sdk2py.go2.sport.sport_client import SportClient
 
@@ -25,12 +26,9 @@ class VoiceControl:
         self.tts_queue = queue.Queue()
         self.asr_queue = queue.Queue()
 
-        # TTS引擎初始化
-        self.tts_engine = pyttsx3.init()
-        self.voices = self.tts_engine.getProperty('voices')
-        if len(self.voices) > 0:
-            self.tts_engine.setProperty('voice', self.voices[0].id)  # 设置首个可用语音
-        self.tts_engine.setProperty('rate', 150)  # 设置语速
+        # 异步事件循环
+        self.loop = asyncio.new_event_loop()
+        self.tts_thread = None
 
         # 状态控制
         self.running = True
@@ -66,6 +64,38 @@ class VoiceControl:
             r"正常模式$": -2,
             r"退出$": 0
         }
+
+    async def tts_worker(self):
+        """TTS工作协程"""
+        while self.running:
+            try:
+                text = self.tts_queue.get_nowait()
+                if text:
+                    print(f"[TTS] {text}")
+                    communicate = edge_tts.Communicate(
+                        text=text,
+                        voice="zh-CN-YunxiNeural",  # 使用中文语音
+                        rate="+10%", 
+                        volume="+0%"
+                    )
+                    
+                    # 使用FFmpeg实时播放
+                    player = subprocess.Popen(
+                        ["ffplay", "-nodisp", "-autoexit", "-"],
+                        stdin=subprocess.PIPE,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
+                    )
+                    
+                    async for chunk in communicate.stream():
+                        if chunk["type"] == "audio":
+                            player.stdin.write(chunk["data"])
+                    player.stdin.close()
+                    await asyncio.sleep(0.1)
+            except queue.Empty:
+                await asyncio.sleep(0.1)
+            except Exception as e:
+                print(f"TTS错误: {str(e)}")
 
     def signal_handler(self, signum, frame):
         """信号处理"""
@@ -113,20 +143,6 @@ class VoiceControl:
             return True
         except OSError:
             return False
-
-    def tts_thread(self):
-        """TTS处理线程"""
-        while self.running:
-            try:
-                text = self.tts_queue.get(timeout=0.5)
-                if text:
-                    print(f"[TTS] {text}")
-                    self.tts_engine.say(text)
-                    self.tts_engine.runAndWait()  # 使用阻塞式播放确保顺序
-            except queue.Empty:
-                continue
-            except Exception as e:
-                print(f"TTS错误: {str(e)}")
 
     def online_asr_processing(self):
         """在线语音识别"""
@@ -251,8 +267,9 @@ class VoiceControl:
         except:
             pass
         
-        # 停止TTS引擎
-        self.tts_engine.stop()
+        # 停止事件循环
+        if self.loop.is_running():
+            self.loop.stop()
         
         # 清空队列
         while not self.tts_queue.empty():
@@ -276,9 +293,18 @@ class VoiceControl:
             self.startup_timer = threading.Timer(10.0, self.startup_timeout)
             self.startup_timer.start()
 
-            # 启动线程
+            # 启动TTS事件循环
+            self.tts_thread = threading.Thread(
+                target=self.loop.run_forever,
+                daemon=True
+            )
+            self.tts_thread.start()
+
+            # 将TTS worker加入事件循环
+            asyncio.run_coroutine_threadsafe(self.tts_worker(), self.loop)
+
+            # 启动其他线程
             threads = [
-                threading.Thread(target=self.tts_thread),
                 threading.Thread(target=self.network_monitor),
                 threading.Thread(target=self.online_asr_processing),
                 threading.Thread(target=self.offline_asr_processing)
