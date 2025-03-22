@@ -48,6 +48,10 @@ class VoiceControl:
         self.sport_client.SetTimeout(10.0)
         self.sport_client.Init()
 
+        self.sport_client.StandDown()
+        time.sleep(2)
+        self.sport_client.StandUp()
+        
         # 命令映射表
         self.command_map = {
             r"确认模式$": -3,
@@ -266,6 +270,8 @@ class VoiceControl:
         
         # 停止运动
         try:
+            self.sport_client.StandDown()
+            time.sleep(2)
             self.sport_client.StopMove()
         except:
             pass
