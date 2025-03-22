@@ -217,6 +217,7 @@ class VoiceControl:
         for pattern, cmd_id in self.command_map.items():
             if re.search(pattern, cmd):
                 action_id = cmd_id
+                print(f"{pattern}, {cmd}, {action_id}")
                 break
 
         if action_id is not None:
@@ -226,6 +227,7 @@ class VoiceControl:
 
     def execute_action(self, action_id, raw_cmd):
         """执行动作"""
+        print(f"执行动作{raw_cmd}, {action_id}")
         try:
             if action_id == 6:
                 self.sport_client.StopMove()
