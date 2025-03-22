@@ -16,38 +16,35 @@ from unitree_sdk2py.go2.sport.sport_client import SportClient
 
 class VoiceControl:
     def __init__(self):
-        # 初始化信号处理
+        # 信号处理
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
         
-        # 初始化队列系统（修复cmd_queue缺失问题）
-        self.cmd_queue = queue.Queue()    # 命令处理队列
-        self.tts_queue = queue.Queue()     # TTS文本队列
-        self.asr_queue = queue.Queue()     # ASR音频数据队列
-        
-        # 初始化TTS引擎
-        self.tts_engine = pyttsx3.init()
-        self.tts_lock = threading.Lock()
-        self.active_utterance = None
-        self.tts_running = True
+        # 队列系统
+        self.cmd_queue = queue.Queue()
+        self.tts_queue = queue.Queue()
+        self.asr_queue = queue.Queue()
 
-        # 设置引擎回调
-        self.tts_engine.connect('started-utterance', self.on_start)
-        self.tts_engine.connect('finished-utterance', self.on_end)
-        
+        # TTS引擎初始化
+        self.tts_engine = pyttsx3.init()
+        self.voices = self.tts_engine.getProperty('voices')
+        if len(self.voices) > 0:
+            self.tts_engine.setProperty('voice', self.voices[0].id)  # 设置首个可用语音
+        self.tts_engine.setProperty('rate', 150)  # 设置语速
+
         # 状态控制
         self.running = True
         self.startup_confirmed = False
         self.startup_timer = None
-        self.debug_mode = True #默认启动，TODO：修改成从配置读取
-        
+        self.debug_mode = True
+
         # 网络状态
         self.current_network_status = self.check_network()
         
-        # 音频资源初始化
+        # 音频设备初始化
         self.audio_interface = pyaudio.PyAudio()
         self.init_voice_engine()
-        
+
         # 运动控制初始化
         self.sport_client = SportClient()
         self.sport_client.SetTimeout(10.0)
@@ -56,7 +53,7 @@ class VoiceControl:
         # 命令映射表
         self.command_map = {
             r"确认模式$": -3,
-            r"停(止|下)?$": 6, r"stop$": 6, 
+            r"停(止|下)?$": 6, r"stop$": 6,
             r"前(进|行)$": 3, r"forward$": 3,
             r"后(退|撤)$": 3, r"back(ward)?$": 3,
             r"左移$": 4, r"left$": 4,
@@ -71,13 +68,13 @@ class VoiceControl:
         }
 
     def signal_handler(self, signum, frame):
-        """信号处理函数"""
+        """信号处理"""
+        print("\n收到终止信号，正在退出...")
         self.running = False
-        self.tts_running = False
-        print("\n接收到终止信号，正在清理资源...")
+        self.cleanup_resources()
 
     def init_voice_engine(self):
-        """语音引擎初始化"""
+        """语音设备初始化"""
         try:
             # 离线ASR模型
             self.vosk_model = Model(lang="cn")
@@ -99,10 +96,10 @@ class VoiceControl:
             self.audio_stream.start_stream()
         except Exception as e:
             self.cleanup_resources()
-            raise RuntimeError(f"语音引擎初始化失败: {str(e)}")
+            raise RuntimeError(f"语音设备初始化失败: {str(e)}")
 
     def audio_callback(self, in_data, frame_count, time_info, status):
-        """音频回调（处理原始字节数据）"""
+        """音频回调"""
         if self.running:
             self.asr_queue.put(in_data)
             return (in_data, pyaudio.paContinue)
@@ -117,39 +114,15 @@ class VoiceControl:
         except OSError:
             return False
 
-    def on_start(self, name):
-        """TTS开始回调"""
-        with self.tts_lock:
-            self.active_utterance = name
-            
-    def on_end(self, name, completed):
-        """TTS结束回调"""
-        with self.tts_lock:
-            self.active_utterance = None
-            
     def tts_thread(self):
-        """TTS线程（处理文本消息）"""
-        while self.tts_running:
+        """TTS处理线程"""
+        while self.running:
             try:
-                text = self.tts_queue.get(timeout=0.3)
-                if text and self.tts_running:
-                    utterance_id = str(hash(text + str(time.time())))
-                    
-                    with self.tts_lock:
-                        if not self.tts_running:
-                            break
-                        self.tts_engine.say(text, utterance_id)
-                        self.tts_engine.startLoop(False)
-                        
-                        while self.tts_running and self.active_utterance == utterance_id:
-                            self.tts_engine.iterate()
-                            time.sleep(0.1)
-                            if not self.tts_running:
-                                self.tts_engine.endLoop()
-                                break
-                            
-                        self.tts_engine.endLoop()
-
+                text = self.tts_queue.get(timeout=0.5)
+                if text:
+                    print(f"[TTS] {text}")
+                    self.tts_engine.say(text)
+                    self.tts_engine.runAndWait()  # 使用阻塞式播放确保顺序
             except queue.Empty:
                 continue
             except Exception as e:
@@ -163,8 +136,11 @@ class VoiceControl:
                 try:
                     audio = self.online_recognizer.listen(source, timeout=3)
                     text = self.online_recognizer.recognize_google(audio, language='zh-CN')
-                    self.cmd_queue.put(text)  # 修复：使用正确的命令队列
-                except (sr.UnknownValueError, sr.WaitTimeoutError):
+                    print(f"[在线识别] {text}")
+                    self.cmd_queue.put(text)
+                except sr.UnknownValueError:
+                    print("无法识别语音")
+                except sr.WaitTimeoutError:
                     continue
                 except sr.RequestError:
                     self.current_network_status = False
@@ -176,16 +152,14 @@ class VoiceControl:
         while self.running and not self.current_network_status:
             data = self.asr_queue.get()
             if rec.AcceptWaveform(data):
-                result = rec.Result()
-                try:
-                    text = json.loads(result)["text"]
-                    if text:
-                        self.cmd_queue.put(text)  # 修复：使用正确的命令队列
-                except json.JSONDecodeError:
-                    continue
+                result = json.loads(rec.Result())
+                text = result.get('text', '')
+                if text:
+                    print(f"[离线识别] {text}")
+                    self.cmd_queue.put(text)
 
     def network_monitor(self):
-        """网络状态监控"""
+        """网络状态监测"""
         while self.running:
             new_status = self.check_network()
             if new_status != self.current_network_status:
@@ -198,6 +172,7 @@ class VoiceControl:
         """命令处理"""
         cmd = command.lower().replace(" ", "")
         
+        # 启动确认处理
         if not self.startup_confirmed:
             if re.search(r"确认模式$", cmd):
                 self.startup_confirmed = True
@@ -217,10 +192,10 @@ class VoiceControl:
             return
         elif re.search(r"退出$", cmd):
             self.running = False
-            self.tts_queue.put("程序结束")
+            self.tts_queue.put("正在关机")
             return
 
-        # 运动控制
+        # 运动控制命令
         action_id = None
         for pattern, cmd_id in self.command_map.items():
             if re.search(pattern, cmd):
@@ -261,59 +236,38 @@ class VoiceControl:
             
     def cleanup_resources(self):
         """资源清理"""
-        print("[DEBUG] 开始清理资源...")
+        print("正在清理资源...")
         self.running = False
-        self.tts_running = False
-        
-        # 停止TTS引擎
-        print("[DEBUG] 停止TTS引擎...")
-        try:
-            with self.tts_lock:
-                if self.active_utterance:
-                    self.tts_engine.stop()
-            self.tts_engine.endLoop()
-        except Exception as e:
-            print(f"[ERROR] 停止TTS引擎时出错: {str(e)}")
-        
-        # 清空队列
-        print("[DEBUG] 清空队列...")
-        while not self.tts_queue.empty():
-            try:
-                self.tts_queue.get_nowait()
-            except queue.Empty:
-                break
-        while not self.asr_queue.empty():
-            try:
-                self.asr_queue.get_nowait()
-            except queue.Empty:
-                break
         
         # 停止音频流
-        try:
-            if self.audio_stream.is_active():
-                self.audio_stream.stop_stream()
-            self.audio_stream.close()
-            self.audio_interface.terminate()
-        except Exception as e:
-            print(f"[ERROR] 停止音频流时出错: {str(e)}")
+        if self.audio_stream.is_active():
+            self.audio_stream.stop_stream()
+        self.audio_stream.close()
+        self.audio_interface.terminate()
         
-        # 确保运动停止
+        # 停止运动
         try:
             self.sport_client.StopMove()
-        except Exception as e:
-            print(f"[ERROR] 停止运动时出错: {str(e)}")
+        except:
+            pass
         
-        print("[DEBUG] 资源清理完成")
+        # 停止TTS引擎
+        self.tts_engine.stop()
+        
+        # 清空队列
+        while not self.tts_queue.empty():
+            self.tts_queue.get_nowait()
+        while not self.asr_queue.empty():
+            self.asr_queue.get_nowait()
 
     def startup_timeout(self):
-        """启动确认超时处理"""
+        """启动超时处理"""
         if not self.startup_confirmed:
-            print("[DEBUG] 启动确认超时")
+            print("启动确认超时")
             self.tts_queue.put("启动确认超时，程序即将退出")
-            time.sleep(2)  # 确保语音提示完成
+            time.sleep(2)
             self.running = False
-            self.tts_running = False
-            
+
     def run(self):
         """主运行逻辑"""
         try:
@@ -338,16 +292,12 @@ class VoiceControl:
             while self.running:
                 try:
                     command = self.cmd_queue.get(timeout=0.5)
-                    if command:
-                        self.process_command(command)
+                    self.process_command(command)
                 except queue.Empty:
-                    if not self.startup_confirmed and not self.startup_timer.is_alive():
-                        self.running = False
+                    continue
         finally:
-            # 确保取消定时器
             if self.startup_timer and self.startup_timer.is_alive():
                 self.startup_timer.cancel()
-                
             self.cleanup_resources()
             print("程序已安全退出")
 
