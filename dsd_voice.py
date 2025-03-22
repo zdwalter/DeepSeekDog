@@ -187,7 +187,7 @@ class VoiceControl:
     def process_command(self, command):
         """命令处理"""
         cmd = command.lower().replace(" ", "")
-        
+        print(f"{cmd}")
         # 启动确认处理
         if not self.startup_confirmed:
             if re.search(r"确认模式$", cmd):
