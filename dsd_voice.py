@@ -227,7 +227,7 @@ class VoiceControl:
         else:
             self.tts_queue.put("指令未识别")
 
-    def execute_action(self, action_id, raw_cmd):
+    def execute_action(self, action_id, raw_cmd=""):
         """执行动作"""
         print(f"执行动作{raw_cmd}, {action_id}")
         step = 0.3
@@ -243,7 +243,11 @@ class VoiceControl:
             elif action_id == 5:
                 self.sport_client.Move(0, 0, 0.5)
             elif action_id == 1:
-                self.sport_client.StandUp()
+                #self.sport_client.StandUp()
+                self.sport_client.Euler(0.1, 0.2, 0.3); // 输入参数分别为roll, pitch, yaw角度
+                self.sport_client.BodyHeight(0.0);      // 机身的相对高度，0对应0.33m
+                self.sport_client.BalanceStand();       //平衡站立
+
             elif action_id == 2:
                 self.sport_client.StandDown()
             elif action_id == 9:
@@ -296,8 +300,8 @@ class VoiceControl:
     def run(self):
         """主运行逻辑"""
         try:
-
-            if 1:
+            self.execute_action(1) #balance stand
+            if 0:
                 #self.sport_client.StandDown()
                 #time.sleep(2)
                 #self.sport_client.StandUp()
