@@ -232,14 +232,15 @@ class VoiceControl:
     def execute_action(self, action_id, raw_cmd):
         """执行动作"""
         print(f"执行动作{raw_cmd}, {action_id}")
+        step = 1.0
         try:
             if action_id == 6:
                 self.sport_client.StopMove()
             elif action_id == 3:
-                speed = -0.3 if any(x in raw_cmd for x in ["后", "back"]) else 0.3
+                speed = -step if any(x in raw_cmd for x in ["后", "back"]) else step
                 self.sport_client.Move(speed, 0, 0)
             elif action_id == 4:
-                speed = -0.3 if any(x in raw_cmd for x in ["右", "right"]) else 0.3
+                speed = -step if any(x in raw_cmd for x in ["右", "right"]) else step
                 self.sport_client.Move(0, speed, 0)
             elif action_id == 5:
                 self.sport_client.Move(0, 0, 0.5)
