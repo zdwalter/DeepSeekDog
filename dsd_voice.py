@@ -49,10 +49,10 @@ class VoiceControl:
         self.sport_client.Init()
 
         if 1:
-            self.sport_client.StandDown()
-            time.sleep(2)
-            self.sport_client.StandUp()
-            time.sleep(2)
+            #self.sport_client.StandDown()
+            #time.sleep(2)
+            #self.sport_client.StandUp()
+            #time.sleep(2)
             self.sport_client.Move(0.3, 0, 0)
             time.sleep(2)
             self.sport_client.Move(-0.3, 0, 0)
@@ -237,7 +237,7 @@ class VoiceControl:
     def execute_action(self, action_id, raw_cmd):
         """执行动作"""
         print(f"执行动作{raw_cmd}, {action_id}")
-        step = 1.0
+        step = 0.3
         try:
             if action_id == 6:
                 self.sport_client.StopMove()
