@@ -5,15 +5,17 @@ import queue
 import socket
 import json
 import re
-import signal
 import speech_recognition as sr
 import edge_tts
 import asyncio
 import subprocess
-from vosk import Model, KaldiRecognizer
+import os
 import pyaudio
+from vosk import Model, KaldiRecognizer
 from unitree_sdk2py.core.channel import ChannelFactoryInitialize
 from unitree_sdk2py.go2.sport.sport_client import SportClient
+from unitree_sdk2py.go2.video.video_client import VideoClient
+import signal
 
 class VoiceControl:
     def __init__(self):
@@ -48,8 +50,11 @@ class VoiceControl:
         self.sport_client.SetTimeout(10.0)
         self.sport_client.Init()
 
+        # 视频客户端初始化
+        self.video_client = VideoClient()
+        self.video_client.SetTimeout(3.0)
+        self.video_client.Init()
 
-        
         # 命令映射表
         self.command_map = {
             r"确认模式$": -3,
@@ -64,7 +69,8 @@ class VoiceControl:
             r"平衡站$": 9, r"balance$": 9,
             r"调试模式$": -1,
             r"正常模式$": -2,
-            r"退出$": 0
+            r"退出$": 0,
+            r"拍(照|照片|图片)$": 7, r"take photo$": 7  # 新增拍照命令
         }
 
     async def tts_worker(self):
@@ -76,12 +82,11 @@ class VoiceControl:
                     print(f"[TTS] {text}")
                     communicate = edge_tts.Communicate(
                         text=text,
-                        voice="zh-CN-YunxiNeural",  # 使用中文语音
+                        voice="zh-CN-YunxiNeural",
                         rate="+10%", 
                         volume="+0%"
                     )
                     
-                    # 使用FFmpeg实时播放
                     player = subprocess.Popen(
                         ["ffplay", "-nodisp", "-autoexit", "-"],
                         stdin=subprocess.PIPE,
@@ -108,14 +113,10 @@ class VoiceControl:
     def init_voice_engine(self):
         """语音设备初始化"""
         try:
-            # 离线ASR模型
             self.vosk_model = Model(lang="cn")
-            
-            # 在线识别设备
             self.online_recognizer = sr.Recognizer()
             self.microphone = sr.Microphone()
             
-            # 音频输入流
             self.audio_stream = self.audio_interface.open(
                 format=pyaudio.paInt16,
                 channels=1,
@@ -140,7 +141,7 @@ class VoiceControl:
 
     def check_network(self):
         """网络检测"""
-        return False #debug
+        return False  # debug模式
         try:
             socket.create_connection(("www.baidu.com", 80), timeout=2)
             return True
@@ -191,7 +192,6 @@ class VoiceControl:
         """命令处理"""
         cmd = command.lower().replace(" ", "")
         print(f"{cmd}")
-        # 启动确认处理
         if not self.startup_confirmed:
             if re.search(r"确认模式$", cmd):
                 self.startup_confirmed = True
@@ -200,7 +200,6 @@ class VoiceControl:
                 self.tts_queue.put("启动确认成功，进入操作模式")
             return
 
-        # 模式切换命令
         if re.search(r"调试模式$", cmd):
             self.debug_mode = True
             self.tts_queue.put("已进入调试模式")
@@ -214,7 +213,6 @@ class VoiceControl:
             self.tts_queue.put("正在关机")
             return
 
-        # 运动控制命令
         action_id = None
         for pattern, cmd_id in self.command_map.items():
             if re.search(pattern, cmd):
@@ -243,15 +241,22 @@ class VoiceControl:
             elif action_id == 5:
                 self.sport_client.Move(0, 0, 0.5)
             elif action_id == 1:
-                #self.sport_client.StandUp()
-                self.sport_client.Euler(0.1, 0.2, 0.3)# 输入参数分别为roll, pitch, yaw角度
-                self.sport_client.BodyHeight(0.0)# 机身的相对高度，0对应0.33m
-                self.sport_client.BalanceStand()#平衡站立
-
+                self.sport_client.Euler(0.1, 0.2, 0.3)
+                self.sport_client.BodyHeight(0.0)
+                self.sport_client.BalanceStand()
             elif action_id == 2:
                 self.sport_client.StandDown()
             elif action_id == 9:
                 self.sport_client.BalanceStand()
+            elif action_id == 7:  # 拍照处理
+                code, data = self.video_client.GetImageSample()
+                if code == 0:
+                    image_name = f"photo_{int(time.time())}.jpg"
+                    with open(image_name, "wb") as f:
+                        f.write(bytes(data))
+                    self.tts_queue.put(f"拍照成功，已保存为{image_name}")
+                else:
+                    self.tts_queue.put("拍照失败，请重试")
             
             if not self.debug_mode:
                 self.tts_queue.put("指令已执行")
@@ -265,13 +270,11 @@ class VoiceControl:
         print("正在清理资源...")
         self.running = False
         
-        # 停止音频流
         if self.audio_stream.is_active():
             self.audio_stream.stop_stream()
         self.audio_stream.close()
         self.audio_interface.terminate()
         
-        # 停止运动
         try:
             self.sport_client.StandDown()
             time.sleep(2)
@@ -279,11 +282,15 @@ class VoiceControl:
         except:
             pass
         
-        # 停止事件循环
+        # 清理视频客户端
+        try:
+            del self.video_client
+        except:
+            pass
+        
         if self.loop.is_running():
             self.loop.stop()
         
-        # 清空队列
         while not self.tts_queue.empty():
             self.tts_queue.get_nowait()
         while not self.asr_queue.empty():
@@ -300,33 +307,26 @@ class VoiceControl:
     def run(self):
         """主运行逻辑"""
         try:
-            self.execute_action(1) #balance stand
+            self.execute_action(1)
             if 0:
-                #self.sport_client.StandDown()
-                #time.sleep(2)
-                #self.sport_client.StandUp()
-                #time.sleep(2)
                 self.tts_queue.put("启动测试：前进")
                 self.sport_client.Move(0.3, 0, 0)
                 time.sleep(2)
                 self.tts_queue.put("启动测试：后退")
                 self.sport_client.Move(-0.3, 0, 0)
-            # 启动确认
+
             self.tts_queue.put("请说'确认模式'以启动程序，您有30秒时间")
             self.startup_timer = threading.Timer(30.0, self.startup_timeout)
             self.startup_timer.start()
 
-            # 启动TTS事件循环
             self.tts_thread = threading.Thread(
                 target=self.loop.run_forever,
                 daemon=True
             )
             self.tts_thread.start()
 
-            # 将TTS worker加入事件循环
             asyncio.run_coroutine_threadsafe(self.tts_worker(), self.loop)
 
-            # 启动其他线程
             threads = [
                 threading.Thread(target=self.network_monitor),
                 threading.Thread(target=self.online_asr_processing),
@@ -337,9 +337,6 @@ class VoiceControl:
                 t.daemon = True
                 t.start()
 
-
-            
-            # 主循环
             while self.running:
                 try:
                     command = self.cmd_queue.get(timeout=0.5)
