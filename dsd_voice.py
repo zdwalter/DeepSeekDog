@@ -138,6 +138,7 @@ class VoiceControl:
 
     def check_network(self):
         """网络检测"""
+        return False #debug
         try:
             socket.create_connection(("www.baidu.com", 80), timeout=2)
             return True
