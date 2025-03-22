@@ -48,14 +48,7 @@ class VoiceControl:
         self.sport_client.SetTimeout(10.0)
         self.sport_client.Init()
 
-        if 1:
-            #self.sport_client.StandDown()
-            #time.sleep(2)
-            #self.sport_client.StandUp()
-            #time.sleep(2)
-            self.sport_client.Move(0.3, 0, 0)
-            time.sleep(2)
-            self.sport_client.Move(-0.3, 0, 0)
+
         
         # 命令映射表
         self.command_map = {
@@ -303,6 +296,17 @@ class VoiceControl:
     def run(self):
         """主运行逻辑"""
         try:
+
+            if 1:
+                #self.sport_client.StandDown()
+                #time.sleep(2)
+                #self.sport_client.StandUp()
+                #time.sleep(2)
+                self.tts_queue.put("启动测试：前进")
+                self.sport_client.Move(0.3, 0, 0)
+                time.sleep(2)
+                self.tts_queue.put("启动测试：后退")
+                self.sport_client.Move(-0.3, 0, 0)
             # 启动确认
             self.tts_queue.put("请说'确认模式'以启动程序，您有10秒时间")
             self.startup_timer = threading.Timer(10.0, self.startup_timeout)
@@ -329,6 +333,8 @@ class VoiceControl:
                 t.daemon = True
                 t.start()
 
+
+            
             # 主循环
             while self.running:
                 try:
