@@ -308,8 +308,8 @@ class VoiceControl:
                 self.tts_queue.put("启动测试：后退")
                 self.sport_client.Move(-0.3, 0, 0)
             # 启动确认
-            self.tts_queue.put("请说'确认模式'以启动程序，您有10秒时间")
-            self.startup_timer = threading.Timer(10.0, self.startup_timeout)
+            self.tts_queue.put("请说'确认模式'以启动程序，您有30秒时间")
+            self.startup_timer = threading.Timer(30.0, self.startup_timeout)
             self.startup_timer.start()
 
             # 启动TTS事件循环
