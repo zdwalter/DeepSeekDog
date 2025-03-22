@@ -244,9 +244,9 @@ class VoiceControl:
                 self.sport_client.Move(0, 0, 0.5)
             elif action_id == 1:
                 #self.sport_client.StandUp()
-                self.sport_client.Euler(0.1, 0.2, 0.3); // 输入参数分别为roll, pitch, yaw角度
-                self.sport_client.BodyHeight(0.0);      // 机身的相对高度，0对应0.33m
-                self.sport_client.BalanceStand();       //平衡站立
+                self.sport_client.Euler(0.1, 0.2, 0.3)# 输入参数分别为roll, pitch, yaw角度
+                self.sport_client.BodyHeight(0.0)# 机身的相对高度，0对应0.33m
+                self.sport_client.BalanceStand()#平衡站立
 
             elif action_id == 2:
                 self.sport_client.StandDown()
