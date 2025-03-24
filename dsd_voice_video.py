@@ -331,7 +331,7 @@ class VoiceControl:
                 self.sport_client.BodyHeight(0.0)
                 self.sport_client.BalanceStand()
             elif action_id == 2:
-                self.sport_client.StandDown()
+                self.sport_client.Sit()
             elif action_id == 9:
                 self.sport_client.BalanceStand()
             elif action_id == 7:
