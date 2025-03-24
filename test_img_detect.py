@@ -86,7 +86,7 @@ class OfflineYOLODetector:
     
     def _check_dependencies(self) -> None:
         """检查必要依赖"""
-        required = {'torch', 'torchvision', 'numpy', 'opencv-python'}
+        required = {'torch', 'torchvision', 'numpy', 'cv2'}
         missing = []
         for pkg in required:
             try:
