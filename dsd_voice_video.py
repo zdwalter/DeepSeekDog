@@ -15,10 +15,78 @@ import cv2
 import torch
 import numpy as np
 from vosk import Model, KaldiRecognizer
+from pathlib import Path
 from unitree_sdk2py.core.channel import ChannelFactoryInitialize
 from unitree_sdk2py.go2.sport.sport_client import SportClient
 from unitree_sdk2py.go2.video.video_client import VideoClient
 import signal
+
+class OfflineYOLODetector:
+    """离线YOLOv5目标检测器（优化版）"""
+    
+    def __init__(self, repo_path="yolov5", model_weights="yolov5s.pt"):
+        self.model = None
+        self.class_names = None
+        self._init_detector(repo_path, model_weights)
+        
+        # 中英标签映射
+        self.label_translation = {
+            'person': '人', 'car': '汽车', 'chair': '椅子',
+            'book': '书', 'cell phone': '手机', 'cup': '杯子',
+            'laptop': '笔记本电脑', 'dog': '狗', 'cat': '猫',
+            'bottle': '瓶子', 'keyboard': '键盘', 'mouse': '鼠标',
+            'tv': '电视', 'umbrella': '雨伞', 'backpack': '背包'
+        }
+        
+    def _init_detector(self, repo_path, model_weights):
+        """初始化检测器（带错误处理）"""
+        try:
+            self._verify_paths(repo_path, model_weights)
+            self.model = torch.hub.load(
+                str(repo_path),
+                'custom',
+                source='local',
+                path=str(model_weights),
+                autoshape=True,
+                verbose=False
+            )
+            self.class_names = self.model.names
+            print("图像识别模型加载成功")
+        except Exception as e:
+            print(f"模型初始化失败: {str(e)}")
+            self.model = None
+
+    def _verify_paths(self, repo_path, model_weights):
+        """验证模型路径"""
+        required_files = ['hubconf.py', 'models/common.py']
+        repo_path = Path(repo_path)
+        if not repo_path.exists():
+            raise FileNotFoundError("YOLOv5代码仓库不存在")
+        for f in required_files:
+            if not (repo_path / f).exists():
+                raise FileNotFoundError(f"缺失文件: {f}")
+        if not Path(model_weights).exists():
+            raise FileNotFoundError("模型权重文件不存在")
+
+    def analyze(self, image_path, conf_thresh=0.5):
+        """执行图像分析"""
+        if not self.model:
+            return None
+            
+        try:
+            results = self.model(image_path, size=320)  # 降低分辨率提升速度
+            detections = results.pandas().xyxy[0]
+            valid_detections = detections[detections.confidence >= conf_thresh]
+            
+            items = []
+            for _, row in valid_detections.iterrows():
+                cn_name = self.label_translation.get(row['name'].lower(), row['name'])
+                if cn_name not in items:
+                    items.append(cn_name)
+            return items
+        except Exception as e:
+            print(f"识别错误: {str(e)}")
+            return None
 
 class VoiceControl:
     def __init__(self):
@@ -58,11 +126,11 @@ class VoiceControl:
         self.video_client.SetTimeout(3.0)
         self.video_client.Init()
 
-        # 图像识别初始化
-        self.model = None
-        self.last_photo_path = ""
-        self.init_image_recognition()
 
+        # 图像识别初始化（修改部分）
+        self.detector = OfflineYOLODetector(repo_path="yolov5", model_weights="yolov5s.pt")
+        self.last_photo_path = ""
+        
         # 命令映射表
         self.command_map = {
             r"确认模式$": -3,
@@ -290,7 +358,7 @@ class VoiceControl:
             self.tts_queue.put("拍照失败，请重试")
 
     def handle_image_analysis(self):
-        """处理图像分析命令"""
+        """优化后的图像分析处理"""
         if not self.last_photo_path:
             self.tts_queue.put("请先拍摄照片")
             return
@@ -299,9 +367,10 @@ class VoiceControl:
             self.tts_queue.put("照片文件不存在")
             return
         
-        result = self.analyze_image(self.last_photo_path)
-        if result:
-            self.tts_queue.put(f"识别到以下物品：{result}")
+        items = self.detector.analyze(self.last_photo_path)
+        if items:
+            result = "、".join(items[:3])  # 最多返回3个结果
+            self.tts_queue.put(f"识别到：{result}")
         else:
             self.tts_queue.put("未识别到有效物品")
 
@@ -369,12 +438,10 @@ class VoiceControl:
         except:
             pass
         
-        # 模型资源
-        try:
-            del self.model
+        # 释放检测器资源
+        if self.detector and self.detector.model:
+            del self.detector.model
             torch.cuda.empty_cache()
-        except:
-            pass
         
         # 事件循环
         if self.loop.is_running():
