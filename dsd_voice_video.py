@@ -132,7 +132,8 @@ class OfflineYOLODetector:
                 source='local',
                 path=str(model_weights),
                 autoshape=True,
-                verbose=False
+                verbose=True,
+                skip_validation=True
             )
             self.class_names = self.model.names
             print("图像识别模型加载成功")
