@@ -28,6 +28,9 @@ from flask_socketio import SocketIO
 import threading
 import os
 import time
+import rospy
+from sensor_msgs.msg import PointCloud2
+import sensor_msgs.point_cloud2 as pc2
 
 class WebInterface:
     def __init__(self, voice_controller, host='0.0.0.0', port=5000):
@@ -238,6 +241,68 @@ class VoiceControl:
             r"识别(物品|内容)$": 8, r"analyze$": 8
         }
 
+        # ROS节点初始化
+        rospy.init_node('voice_control_node', anonymous=True)
+        
+        # 点云订阅者
+        self.point_cloud_sub = rospy.Subscriber(
+            "rt/utlidar/cloud_deskewed", 
+            PointCloud2, 
+            self.point_cloud_callback
+        )
+        
+        # 存储最新点云
+        self.latest_point_cloud = None
+        self.point_cloud_lock = threading.Lock()
+        
+    def point_cloud_callback(self, msg):
+        """点云数据回调函数"""
+        try:
+            # 将PointCloud2消息转换为可处理的格式
+            cloud_points = list(pc2.read_points(msg, skip_nans=True))
+            
+            with self.point_cloud_lock:
+                self.latest_point_cloud = cloud_points
+                
+            # 调试信息
+            if self.debug_mode:
+                print(f"收到点云数据，点数: {len(cloud_points)}")
+                
+        except Exception as e:
+            print(f"处理点云数据出错: {str(e)}")
+
+    def get_obstacle_info(self):
+        """获取障碍物信息"""
+        if self.latest_point_cloud is None:
+            return None
+            
+        try:
+            with self.point_cloud_lock:
+                cloud_points = self.latest_point_cloud.copy()
+                
+            # 简单分析前方障碍物 (x轴正方向)
+            front_points = [
+                p for p in cloud_points 
+                if 0 < p[0] < 2.0 and -0.5 < p[1] < 0.5
+            ]
+            
+            if not front_points:
+                return None
+                
+            # 找出最近的障碍物
+            closest = min(front_points, key=lambda p: p[0])
+            distance = closest[0]
+            
+            return {
+                'distance': distance,
+                'position': (closest[0], closest[1], closest[2]),
+                'count': len(front_points)
+            }
+            
+        except Exception as e:
+            print(f"分析障碍物信息出错: {str(e)}")
+            return None
+            
     def init_image_recognition(self):
         """初始化图像识别模型"""
         try:
@@ -395,9 +460,17 @@ class VoiceControl:
             self.tts_queue.put("指令未识别")
 
     def execute_action(self, action_id, raw_cmd=""):
-        """执行动作"""
+        """执行动作（添加障碍物检测）"""
         print(f"执行动作{raw_cmd}, {action_id}")
         try:
+            if action_id in [3, 4]:  # 前进或左右移动
+                # 检查前方障碍物
+                obstacle = self.get_obstacle_info()
+                
+                if obstacle and obstacle['distance'] < 0.5:  # 0.5米内有障碍物
+                    self.tts_queue.put(f"前方{obstacle['distance']:.1f}米处检测到障碍物")
+                    return
+                    
             if action_id == 6:
                 self.sport_client.StopMove()
             elif action_id == 3:
@@ -522,7 +595,13 @@ class VoiceControl:
             del self.video_client
         except:
             pass
-        
+            
+        # 关闭ROS节点
+        try:
+            rospy.signal_shutdown("程序退出")
+        except:
+            pass
+            
         # 释放检测器资源
         if self.detector and self.detector.model:
             del self.detector.model
