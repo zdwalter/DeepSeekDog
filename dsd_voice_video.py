@@ -19,6 +19,8 @@ from pathlib import Path
 from unitree_sdk2py.core.channel import ChannelFactoryInitialize
 from unitree_sdk2py.go2.sport.sport_client import SportClient
 from unitree_sdk2py.go2.video.video_client import VideoClient
+from unitree_sdk2py.go2.obstacles_avoid.obstacles_avoid_client import ObstaclesAvoidClient
+
 import signal
 
 from flask import Flask, render_template, request, jsonify, send_from_directory
@@ -198,7 +200,16 @@ class VoiceControl:
         self.sport_client = SportClient()
         self.sport_client.SetTimeout(10.0)
         self.sport_client.Init()
-
+        
+        # 添加避障客户端初始化
+        self.obstacle_client = ObstaclesAvoidClient()
+        self.obstacle_client.SetTimeout(10.0)
+        self.obstacle_client.Init()
+        
+        # 启用避障模式
+        self.obstacle_client.SwitchSet(True)
+        self.obstacle_client.UseRemoteCommandFromApi(True)
+        
         # 视频客户端初始化
         self.video_client = VideoClient()
         self.video_client.SetTimeout(3.0)
@@ -391,11 +402,14 @@ class VoiceControl:
                 self.sport_client.StopMove()
             elif action_id == 3:
                 speed = -0.3 if any(x in raw_cmd for x in ["后", "back"]) else 0.3
-                self.sport_client.Move(speed, 0, 0)
+                # 使用避障模式移动
+                self.obstacle_client.Move(speed, 0, 0)
             elif action_id == 4:
                 speed = -0.3 if any(x in raw_cmd for x in ["右", "right"]) else 0.3
-                self.sport_client.Move(0, speed, 0)
+                # 使用避障模式移动
+                self.obstacle_client.Move(0, speed, 0)
             elif action_id == 5:
+                # 旋转仍然使用普通模式
                 self.sport_client.Move(0, 0, 0.5)
             elif action_id == 1:
                 self.sport_client.Euler(0.1, 0.2, 0.3)
