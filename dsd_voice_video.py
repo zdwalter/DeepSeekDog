@@ -182,9 +182,8 @@ class VoiceControl:
 
         # 状态控制
         self.running = True
-        self.startup_confirmed = False
-        self.startup_timer = None
-        self.debug_mode = True
+        self.debug_mode = True  # 默认调试模式
+        self.current_network_status = self.check_network()
 
         # 网络状态
         self.current_network_status = self.check_network()
@@ -212,7 +211,6 @@ class VoiceControl:
         
         # 命令映射表
         self.command_map = {
-            r"确认模式$": -3,
             r"停(止|下)?$": 6, r"stop$": 6,
             r"前(进|行)$": 3, r"forward$": 3,
             r"后(退|撤)$": 3, r"back(ward)?$": 3,
@@ -358,14 +356,8 @@ class VoiceControl:
         """命令处理"""
         cmd = command.lower().replace(" ", "")
         print(f"{cmd}")
-        if not self.startup_confirmed:
-            if re.search(r"确认模式$", cmd):
-                self.startup_confirmed = True
-                if self.startup_timer:
-                    self.startup_timer.cancel()
-                self.tts_queue.put("启动确认成功，进入操作模式")
-            return
-
+        
+        # 移除启动确认检查
         if re.search(r"调试模式$", cmd):
             self.debug_mode = True
             self.tts_queue.put("已进入调试模式")
@@ -378,14 +370,14 @@ class VoiceControl:
             self.running = False
             self.tts_queue.put("正在关机")
             return
-
+    
         action_id = None
         for pattern, cmd_id in self.command_map.items():
             if re.search(pattern, cmd):
                 action_id = cmd_id
                 print(f"{pattern}, {cmd}, {action_id}")
                 break
-
+    
         if action_id is not None:
             self.execute_action(action_id, cmd)
         else:
@@ -532,40 +524,32 @@ class VoiceControl:
         while not self.asr_queue.empty():
             self.asr_queue.get_nowait()
 
-    def startup_timeout(self):
-        """启动超时处理"""
-        if not self.startup_confirmed:
-            print("启动确认超时")
-            self.tts_queue.put("启动确认超时，程序即将退出")
-            time.sleep(2)
-            self.running = False
 
     def run(self):
         """主运行逻辑"""
         try:
             self.execute_action(1)  # 初始平衡站立
-            self.tts_queue.put("请说'确认模式'以启动程序，您有30秒时间")
-            self.startup_timer = threading.Timer(30.0, self.startup_timeout)
-            self.startup_timer.start()
-
+            self.tts_queue.put("系统已启动，准备就绪")  # 修改启动提示
+            
+            # 直接启动TTS线程
             self.tts_thread = threading.Thread(
                 target=self.loop.run_forever,
                 daemon=True
             )
             self.tts_thread.start()
-
+    
             asyncio.run_coroutine_threadsafe(self.tts_worker(), self.loop)
-
+    
             threads = [
                 threading.Thread(target=self.network_monitor),
                 threading.Thread(target=self.online_asr_processing),
                 threading.Thread(target=self.offline_asr_processing)
             ]
-
+    
             for t in threads:
                 t.daemon = True
                 t.start()
-
+    
             while self.running:
                 try:
                     command = self.cmd_queue.get(timeout=0.5)
@@ -573,8 +557,6 @@ class VoiceControl:
                 except queue.Empty:
                     continue
         finally:
-            if self.startup_timer and self.startup_timer.is_alive():
-                self.startup_timer.cancel()
             self.cleanup_resources()
             print("程序已安全退出")
 
