@@ -128,8 +128,6 @@
             fetch('/photos')
                 .then(response => response.json())
                 .then(photos => {
-                    const gallery = document.getElementById('photoGallery');
-                    gallery.innerHTML = '';
                     
                     if (photos.length > 0) {
                         // 显示最新照片
