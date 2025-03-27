@@ -54,14 +54,7 @@
                     </div>
                 </div>
                 
-                <div class="card">
-                    <div class="card-header">
-                        <h5>历史照片</h5>
-                    </div>
-                    <div class="card-body photo-container" id="photoGallery">
-                        <!-- 照片将在这里动态加载 -->
-                    </div>
-                </div>
+
             </div>
             
             <div class="col-md-4">
@@ -142,16 +135,7 @@
                         // 显示最新照片
                         document.getElementById('latestPhoto').src = `/photo/${photos[0].filename}`;
                         
-                        // 填充历史照片
-                        photos.forEach(photo => {
-                            const photoItem = document.createElement('div');
-                            photoItem.className = 'photo-item';
-                            photoItem.innerHTML = `
-                                <img src="/photo/${photo.filename}" class="img-thumbnail">
-                                <p class="mt-2 text-muted">${new Date(photo.timestamp * 1000).toLocaleString()}</p>
-                            `;
-                            gallery.appendChild(photoItem);
-                        });
+
                     }
                 });
         }
