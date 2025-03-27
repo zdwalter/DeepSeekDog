@@ -237,17 +237,16 @@ class VoiceControl:
         self.sport_client.SetTimeout(10.0)
         self.sport_client.Init()
         
+        # 添加避障客户端初始化
+        self.obstacle_client = ObstaclesAvoidClient()
+        self.obstacle_client.SetTimeout(10.0)
+        self.obstacle_client.Init()
+        
+        # 启用避障模式
+        self.obstacle_client.SwitchSet(True)
+        self.obstacle_client.UseRemoteCommandFromApi(True)
+        
         if (0):
-
-            
-            # 添加避障客户端初始化
-            self.obstacle_client = ObstaclesAvoidClient()
-            self.obstacle_client.SetTimeout(10.0)
-            self.obstacle_client.Init()
-            
-            # 启用避障模式
-            self.obstacle_client.SwitchSet(True)
-            self.obstacle_client.UseRemoteCommandFromApi(True)
             # ROS节点初始化
             rospy.init_node('voice_control_node', anonymous=True)
             
