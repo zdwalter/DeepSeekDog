@@ -21,6 +21,83 @@ from unitree_sdk2py.go2.sport.sport_client import SportClient
 from unitree_sdk2py.go2.video.video_client import VideoClient
 import signal
 
+from flask import Flask, render_template, request, jsonify, send_from_directory
+from flask_socketio import SocketIO
+import threading
+import os
+import time
+
+class WebInterface:
+    def __init__(self, voice_controller, host='0.0.0.0', port=5000):
+        self.app = Flask(__name__, template_folder='templates', static_folder='static')
+        self.socketio = SocketIO(self.app)
+        self.voice_controller = voice_controller
+        self.host = host
+        self.port = port
+        
+        # 设置路由
+        self.app.add_url_rule('/', 'index', self.index)
+        self.app.add_url_rule('/photos', 'get_photos', self.get_photos, methods=['GET'])
+        self.app.add_url_rule('/photo/<filename>', 'get_photo', self.get_photo)
+        self.app.add_url_rule('/command', 'send_command', self.send_command, methods=['POST'])
+        self.app.add_url_rule('/status', 'get_status', self.get_status, methods=['GET'])
+        
+        # 创建必要的目录
+        os.makedirs('static/photos', exist_ok=True)
+        
+        # 启动Web服务器线程
+        self.server_thread = threading.Thread(target=self.run_server, daemon=True)
+        self.server_thread.start()
+    
+    def index(self):
+        return render_template('index.html')
+    
+    def get_photos(self):
+        photos = []
+        for f in os.listdir('static/photos'):
+            if f.endswith('.jpg'):
+                photos.append({
+                    'filename': f,
+                    'timestamp': os.path.getmtime(f'static/photos/{f}'),
+                    'url': f'/photo/{f}'
+                })
+        return jsonify(sorted(photos, key=lambda x: x['timestamp'], reverse=True))
+    
+    def get_photo(self, filename):
+        return send_from_directory('static/photos', filename)
+    
+    def send_command(self):
+        command = request.json.get('command')
+        if command:
+            self.voice_controller.cmd_queue.put(command)
+            return jsonify({'status': 'success'})
+        return jsonify({'status': 'error', 'message': 'No command provided'}), 400
+    
+    def get_status(self):
+        return jsonify({
+            'running': self.voice_controller.running,
+            'network': self.voice_controller.current_network_status,
+            'mode': 'debug' if self.voice_controller.debug_mode else 'normal'
+        })
+    
+    def run_server(self):
+        print(f"Starting web server on {self.host}:{self.port}")
+        self.socketio.run(self.app, host=self.host, port=self.port)
+    
+    def save_photo(self, image_data):
+        filename = f"photo_{int(time.time())}.jpg"
+        path = f"static/photos/{filename}"
+        with open(path, 'wb') as f:
+            f.write(image_data)
+        
+        # 通知所有客户端有新照片
+        self.socketio.emit('new_photo', {
+            'filename': filename,
+            'timestamp': time.time(),
+            'url': f'/photo/{filename}'
+        })
+        return filename
+        
 class OfflineYOLODetector:
     """离线YOLOv5目标检测器（优化版）"""
     
@@ -111,6 +188,8 @@ class VoiceControl:
 
         # 网络状态
         self.current_network_status = self.check_network()
+
+        self.web_interface = WebInterface(self)
         
         # 音频设备初始化
         self.audio_interface = pyaudio.PyAudio()
@@ -350,9 +429,7 @@ class VoiceControl:
         """处理拍照命令"""
         code, data = self.video_client.GetImageSample()
         if code == 0:
-            self.last_photo_path = f"photo_{int(time.time())}.jpg"
-            with open(self.last_photo_path, "wb") as f:
-                f.write(bytes(data))
+            self.last_photo_path = self.web_interface.save_photo(bytes(data))
             self.tts_queue.put(f"拍照成功，已保存为{self.last_photo_path}")
             # 拍照后直接进行识别
             self.handle_image_analysis()
