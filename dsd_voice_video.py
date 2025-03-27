@@ -640,7 +640,7 @@ class VoiceControl:
     
             threads = [
                 threading.Thread(target=self.network_monitor),
-                threading.Thread(target=self.online_asr_processing),
+                #threading.Thread(target=self.online_asr_processing),
                 threading.Thread(target=self.offline_asr_processing)
             ]
     
