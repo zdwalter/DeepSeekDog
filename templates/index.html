@@ -161,8 +161,7 @@
             fetch('/status')
                 .then(response => response.json())
                 .then(data => {
-                    document.getElementById('runningStatus').textContent = 
-                        data.running ? '运行中' : '已停止';
+                    document.getElementById('runningStatus').textContent = '运行中';
                     document.getElementById('networkStatus').textContent = 
                         data.network ? '在线' : '离线';
                     document.getElementById('workMode').textContent = 
