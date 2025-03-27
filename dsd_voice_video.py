@@ -486,11 +486,11 @@ class VoiceControl:
             elif action_id == 3:
                 speed = -0.3 if any(x in raw_cmd for x in ["后", "back"]) else 0.3
                 # 使用避障模式移动
-                self.obstacle_client.Move(speed, 0, 0)
+                self.sport_client.Move(speed, 0, 0)
             elif action_id == 4:
                 speed = -0.3 if any(x in raw_cmd for x in ["右", "right"]) else 0.3
                 # 使用避障模式移动
-                self.obstacle_client.Move(0, speed, 0)
+                self.sport_client.Move(0, speed, 0)
             elif action_id == 5:
                 # 旋转仍然使用普通模式
                 self.sport_client.Move(0, 0, 0.5)
