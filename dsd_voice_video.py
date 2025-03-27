@@ -191,7 +191,11 @@ class VoiceControl:
         # 状态控制
         self.running = True
         self.debug_mode = True  # 默认调试模式
-        self.current_network_status = self.check_network()
+        
+        # 图像识别初始化（修改部分）
+        self.detector = OfflineYOLODetector(repo_path="yolov5", model_weights="yolov5s.pt")
+        self.last_photo_path = ""
+        
 
         # 网络状态
         self.current_network_status = self.check_network()
@@ -222,10 +226,7 @@ class VoiceControl:
         self.video_client.Init()
 
 
-        # 图像识别初始化（修改部分）
-        self.detector = OfflineYOLODetector(repo_path="yolov5", model_weights="yolov5s.pt")
-        self.last_photo_path = ""
-        
+
         # 命令映射表
         self.command_map = {
             r"停(止|下)?$": 6, r"stop$": 6,
