@@ -371,6 +371,7 @@ class VoiceControl:
                 start=False
             )
             self.audio_stream.start_stream()
+            print("语音设备初始化 成功")
         except Exception as e:
             self.cleanup_resources()
             raise RuntimeError(f"语音设备初始化失败: {str(e)}")
