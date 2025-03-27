@@ -128,7 +128,7 @@
             fetch('/photos')
                 .then(response => response.json())
                 .then(photos => {
-                    
+                    document.getElementById('latestPhoto').src = ``;
                     if (photos.length > 0) {
                         // 显示最新照片
                         document.getElementById('latestPhoto').src = `/photo/${photos[0].filename}`;
