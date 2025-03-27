@@ -109,7 +109,9 @@ class OfflineYOLODetector:
     def __init__(self, repo_path="yolov5", model_weights="yolov5s.pt"):
         self.model = None
         self.class_names = None
+        print("开始加载YOLOv5模型...")
         self._init_detector(repo_path, model_weights)
+        print("YOLOv5模型加载完成")
         
         # 中英标签映射
         self.label_translation = {
