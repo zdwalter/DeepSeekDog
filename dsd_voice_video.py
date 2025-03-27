@@ -231,12 +231,14 @@ class VoiceControl:
             r"拍(照|照片|图片)$": 7, r"take photo$": 7,
             r"识别(物品|内容)$": 8, r"analyze$": 8
         }
-
+        
+        # 运动控制初始化
+        self.sport_client = SportClient()
+        self.sport_client.SetTimeout(10.0)
+        self.sport_client.Init()
+        
         if (0):
-            # 运动控制初始化
-            self.sport_client = SportClient()
-            self.sport_client.SetTimeout(10.0)
-            self.sport_client.Init()
+
             
             # 添加避障客户端初始化
             self.obstacle_client = ObstaclesAvoidClient()
