@@ -473,13 +473,14 @@ class VoiceControl:
         """执行动作（添加障碍物检测）"""
         print(f"执行动作{raw_cmd}, {action_id}")
         try:
-            if action_id in [3, 4]:  # 前进或左右移动
-                # 检查前方障碍物
-                obstacle = self.get_obstacle_info()
-                
-                if obstacle and obstacle['distance'] < 0.5:  # 0.5米内有障碍物
-                    self.tts_queue.put(f"前方{obstacle['distance']:.1f}米处检测到障碍物")
-                    return
+            if 0:
+                if action_id in [3, 4]:  # 前进或左右移动
+                    # 检查前方障碍物
+                    obstacle = self.get_obstacle_info()
+                    
+                    if obstacle and obstacle['distance'] < 0.5:  # 0.5米内有障碍物
+                        self.tts_queue.put(f"前方{obstacle['distance']:.1f}米处检测到障碍物")
+                        return
                     
             if action_id == 6:
                 self.sport_client.StopMove()
