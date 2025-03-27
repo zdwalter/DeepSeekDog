@@ -246,10 +246,10 @@ class VoiceControl:
         self.obstacle_client.SwitchSet(True)
         self.obstacle_client.UseRemoteCommandFromApi(True)
 
-        # ROS节点初始化
-        rospy.init_node('voice_control_node', anonymous=True)
+        
         if (0):
-            
+            # ROS节点初始化, BUG
+            rospy.init_node('voice_control_node', anonymous=True)
             
             # 点云订阅者
             self.point_cloud_sub = rospy.Subscriber(
