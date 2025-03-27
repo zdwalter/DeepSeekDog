@@ -90,7 +90,7 @@ class WebInterface:
         self.socketio.run(self.app, host=self.host, port=self.port)
     
     def save_photo(self, image_data):
-        filename = f"photo_{int(time.time())}.jpg"
+        filename = f"photo.jpg"
         path = f"static/photos/{filename}"
         with open(path, 'wb') as f:
             f.write(image_data)
@@ -101,7 +101,7 @@ class WebInterface:
             'timestamp': time.time(),
             'url': f'/photo/{filename}'
         })
-        return filename
+        return path
         
 class OfflineYOLODetector:
     """离线YOLOv5目标检测器（优化版）"""
