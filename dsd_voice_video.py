@@ -259,6 +259,8 @@ class VoiceControl:
             # 存储最新点云
             self.latest_point_cloud = None
             self.point_cloud_lock = threading.Lock()
+
+        print("初始化完成\n")
         
     def point_cloud_callback(self, msg):
         """点云数据回调函数"""
