@@ -354,6 +354,8 @@ class VoiceControl:
             with open(self.last_photo_path, "wb") as f:
                 f.write(bytes(data))
             self.tts_queue.put(f"拍照成功，已保存为{self.last_photo_path}")
+            # 拍照后直接进行识别
+            self.handle_image_analysis()
         else:
             self.tts_queue.put("拍照失败，请重试")
 
