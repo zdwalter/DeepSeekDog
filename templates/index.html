@@ -24,6 +24,15 @@
             margin: 2px;
             min-width: 80px;
         }
+        #latestPhoto {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+        }
+        #toggleAutoPhotoBtn.active {
+            background-color: #28a745;
+            border-color: #28a745;
+        }
         @media (max-width: 768px) {
             .command-btn {
                 min-width: 60px;
@@ -46,15 +55,23 @@
                     <div class="card-body">
                         <div id="currentPhoto" class="text-center">
                             <img id="latestPhoto" src="" class="img-fluid" style="max-height: 300px;">
-                            <p id="detectionResult" class="mt-2"></p>
+                            <p id="detectionResult" class="mt-2 text-muted"></p>
                         </div>
                         <div class="d-grid gap-2 mt-2">
-                            <button id="takePhotoBtn" class="btn btn-primary">拍照</button>
+                            <button id="takePhotoBtn" class="btn btn-primary">手动拍照</button>
+                            <button id="toggleAutoPhotoBtn" class="btn btn-secondary">开启自动拍照</button>
+                            <div class="d-flex justify-content-between align-items-center mt-2">
+                                <small class="text-muted">自动拍照间隔:</small>
+                                <select id="photoInterval" class="form-select form-select-sm" style="width: 100px;">
+                                    <option value="1000">1秒</option>
+                                    <option value="2000">2秒</option>
+                                    <option value="3000">3秒</option>
+                                    <option value="5000">5秒</option>
+                                </select>
+                            </div>
                         </div>
                     </div>
                 </div>
-                
-
             </div>
             
             <div class="col-md-4">
@@ -111,6 +128,10 @@
                                 <span>工作模式:</span>
                                 <span id="workMode">-</span>
                             </li>
+                            <li class="list-group-item d-flex justify-content-between">
+                                <span>自动拍照:</span>
+                                <span id="autoPhotoStatus">关闭</span>
+                            </li>
                         </ul>
                     </div>
                 </div>
@@ -122,20 +143,40 @@
     <script src="static/socket.io.js"></script>
     <script>
         const socket = io();
+        let autoPhotoInterval = null;
+        let lastPhotoTime = 0;
         
-        // 加载照片列表
-        function loadPhotos() {
-            fetch('/photos')
-                .then(response => response.json())
-                .then(photos => {
-                    document.getElementById('latestPhoto').src = ``;
-                    if (photos.length > 0) {
-                        // 显示最新照片
-                        document.getElementById('latestPhoto').src = `/photo/${photos[0].filename}`;
-                        
-
-                    }
-                });
+        // 加载最新照片
+        function loadLatestPhoto() {
+            const timestamp = new Date().getTime();
+            const img = document.getElementById('latestPhoto');
+            
+            // 添加加载动画
+            img.style.opacity = '0.5';
+            img.style.transition = 'opacity 0.3s';
+            
+            // 设置新的图片源（带时间戳防止缓存）
+            img.src = `/photo/photo.jpg?t=${timestamp}`;
+            
+            // 图片加载完成后恢复透明度
+            img.onload = function() {
+                img.style.opacity = '1';
+                lastPhotoTime = timestamp;
+                updatePhotoTime();
+            };
+            
+            img.onerror = function() {
+                img.src = '';
+                img.alt = '图片加载失败';
+                img.style.opacity = '1';
+            };
+        }
+        
+        // 更新照片时间显示
+        function updatePhotoTime() {
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString();
+            document.getElementById('detectionResult').textContent = `最后更新时间: ${timeStr}`;
         }
         
         // 更新状态
@@ -164,6 +205,34 @@
             });
         }
         
+        // 切换自动拍照
+        function toggleAutoPhoto() {
+            const btn = document.getElementById('toggleAutoPhotoBtn');
+            const interval = parseInt(document.getElementById('photoInterval').value);
+            
+            if (autoPhotoInterval) {
+                clearInterval(autoPhotoInterval);
+                autoPhotoInterval = null;
+                btn.textContent = '开启自动拍照';
+                btn.classList.remove('btn-success');
+                btn.classList.add('btn-secondary');
+                document.getElementById('autoPhotoStatus').textContent = '关闭';
+            } else {
+                // 立即拍一张
+                sendCommand('拍照');
+                
+                // 设置定时器
+                autoPhotoInterval = setInterval(() => {
+                    sendCommand('拍照');
+                }, interval);
+                
+                btn.textContent = '停止自动拍照';
+                btn.classList.remove('btn-secondary');
+                btn.classList.add('btn-success');
+                document.getElementById('autoPhotoStatus').textContent = `${interval/1000}秒间隔`;
+            }
+        }
+        
         // 事件监听
         document.querySelectorAll('.command-btn').forEach(btn => {
             btn.addEventListener('click', () => {
@@ -175,15 +244,35 @@
             sendCommand('拍照');
         });
         
+        document.getElementById('toggleAutoPhotoBtn').addEventListener('click', toggleAutoPhoto);
+        
+        document.getElementById('photoInterval').addEventListener('change', function() {
+            if (autoPhotoInterval) {
+                clearInterval(autoPhotoInterval);
+                const interval = parseInt(this.value);
+                autoPhotoInterval = setInterval(() => {
+                    sendCommand('拍照');
+                }, interval);
+                document.getElementById('autoPhotoStatus').textContent = `${interval/1000}秒间隔`;
+            }
+        });
+        
         // Socket.IO 事件
         socket.on('new_photo', (data) => {
-            loadPhotos();
+            loadLatestPhoto();
         });
         
         // 初始化
         document.addEventListener('DOMContentLoaded', () => {
-            loadPhotos();
+            loadLatestPhoto();
             updateStatus();
+            
+            // 每10秒检查一次照片更新，防止socket.io断开
+            setInterval(() => {
+                if (!autoPhotoInterval && Date.now() - lastPhotoTime > 15000) {
+                    loadLatestPhoto();
+                }
+            }, 10000);
         });
     </script>
 </body>
