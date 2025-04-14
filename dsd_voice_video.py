@@ -30,6 +30,7 @@ import os
 import time
 
 
+        
 class WebInterface:
     def __init__(self, voice_controller, host='0.0.0.0', port=5000):
         self.app = Flask(__name__, template_folder='templates', static_folder='static')
@@ -51,6 +52,19 @@ class WebInterface:
         # 启动Web服务器线程
         self.server_thread = threading.Thread(target=self.run_server, daemon=True)
         self.server_thread.start()
+        # 添加Socket.IO事件处理
+        @self.socketio.on('user_message')
+        def handle_user_message(data):
+            message = data.get('message', '').strip()
+            if message:
+                # 将用户消息放入命令队列
+                self.voice_controller.cmd_queue.put(message)
+                # 可以在这里添加直接回复的逻辑
+                
+    def send_tts_message(self, message):
+        """发送TTS消息到前端"""
+        self.socketio.emit('tts_message', {'message': message})
+        
     
     def index(self):
         return render_template('index.html')
@@ -270,6 +284,9 @@ class VoiceControl:
                 text = self.tts_queue.get_nowait()
                 if text:
                     print(f"[TTS] {text}")
+                    # 发送到前端
+                    self.web_interface.send_tts_message(text)
+                    
                     communicate = edge_tts.Communicate(
                         text=text,
                         voice="zh-CN-YunxiNeural",
@@ -293,6 +310,7 @@ class VoiceControl:
                 await asyncio.sleep(0.1)
             except Exception as e:
                 print(f"TTS错误: {str(e)}")
+                self.web_interface.send_tts_message(f"语音输出错误: {str(e)}")
 
     def signal_handler(self, signum, frame):
         """信号处理"""
