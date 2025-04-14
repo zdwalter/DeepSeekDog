@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>机器狗控制面板</title>
     <link href="static/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="static/bootstrap-icons.css">
     <style>
         .photo-container {
             max-height: 400px;
@@ -33,11 +34,63 @@
             background-color: #28a745;
             border-color: #28a745;
         }
+        
+        /* Interaction Panel Styles */
+        .interaction-panel {
+            margin-top: 20px;
+        }
+        .chat-container {
+            height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 10px;
+            margin-bottom: 10px;
+            background-color: #f8f9fa;
+        }
+        .message {
+            margin-bottom: 10px;
+            padding: 8px 12px;
+            border-radius: 18px;
+            max-width: 80%;
+            word-wrap: break-word;
+        }
+        .user-message {
+            background-color: #007bff;
+            color: white;
+            margin-left: auto;
+            border-bottom-right-radius: 5px;
+        }
+        .bot-message {
+            background-color: #e9ecef;
+            margin-right: auto;
+            border-bottom-left-radius: 5px;
+        }
+        .mic-btn {
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .mic-btn.active {
+            color: #dc3545;
+            transform: scale(1.1);
+        }
+        #voiceInputStatus {
+            font-size: 0.8rem;
+            color: #6c757d;
+        }
+        .status-badge {
+            font-size: 0.75rem;
+            padding: 0.25rem 0.5rem;
+        }
+        
         @media (max-width: 768px) {
             .command-btn {
                 min-width: 60px;
                 padding: 5px;
                 font-size: 12px;
+            }
+            .chat-container {
+                height: 200px;
             }
         }
     </style>
@@ -49,8 +102,9 @@
         <div class="row">
             <div class="col-md-8">
                 <div class="card mb-3">
-                    <div class="card-header">
-                        <h5>实时图像</h5>
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">实时图像</h5>
+                        <span class="badge bg-primary status-badge" id="cameraStatus">摄像头在线</span>
                     </div>
                     <div class="card-body">
                         <div id="currentPhoto" class="text-center">
@@ -72,6 +126,41 @@
                         </div>
                     </div>
                 </div>
+                
+                <!-- Interaction Panel -->
+                <div class="card interaction-panel">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">交互控制</h5>
+                        <span class="badge bg-success status-badge" id="voiceStatus">语音就绪</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="chat-container" id="chatBox">
+                            <div class="message bot-message">
+                                <i class="bi bi-robot"></i> 系统已就绪，您可以通过文字或语音与我交互
+                            </div>
+                        </div>
+                        
+                        <div class="input-group mt-2">
+                            <input type="text" class="form-control" id="textInput" placeholder="输入指令...">
+                            <button class="btn btn-primary" id="sendTextBtn">
+                                <i class="bi bi-send"></i> 发送
+                            </button>
+                        </div>
+                        
+                        <div class="d-flex justify-content-between align-items-center mt-3">
+                            <div>
+                                <button class="btn btn-outline-secondary mic-btn" id="micBtn">
+                                    <i class="bi bi-mic"></i> 语音输入
+                                </button>
+                                <span id="voiceInputStatus">准备就绪</span>
+                            </div>
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="autoListenCheck">
+                                <label class="form-check-label" for="autoListenCheck">自动监听</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
             
             <div class="col-md-4">
@@ -81,18 +170,18 @@
                     </div>
                     <div class="card-body">
                         <div class="text-center mb-3">
-                            <button class="btn btn-success command-btn" data-cmd="前进">前进</button>
+                            <button class="btn btn-success command-btn" data-cmd="前进"><i class="bi bi-arrow-up"></i> 前进</button>
                         </div>
                         <div class="d-flex justify-content-between mb-3">
-                            <button class="btn btn-info command-btn" data-cmd="左移">左移</button>
-                            <button class="btn btn-danger command-btn" data-cmd="停止">停止</button>
-                            <button class="btn btn-info command-btn" data-cmd="右移">右移</button>
+                            <button class="btn btn-info command-btn" data-cmd="左移"><i class="bi bi-arrow-left"></i> 左移</button>
+                            <button class="btn btn-danger command-btn" data-cmd="停止"><i class="bi bi-stop"></i> 停止</button>
+                            <button class="btn btn-info command-btn" data-cmd="右移"><i class="bi bi-arrow-right"></i> 右移</button>
                         </div>
                         <div class="text-center mb-3">
-                            <button class="btn btn-success command-btn" data-cmd="后退">后退</button>
+                            <button class="btn btn-success command-btn" data-cmd="后退"><i class="bi bi-arrow-down"></i> 后退</button>
                         </div>
                         <div class="text-center">
-                            <button class="btn btn-warning command-btn" data-cmd="旋转">旋转</button>
+                            <button class="btn btn-warning command-btn" data-cmd="旋转"><i class="bi bi-arrow-repeat"></i> 旋转</button>
                         </div>
                     </div>
                 </div>
@@ -102,10 +191,10 @@
                         <h5>姿态控制</h5>
                     </div>
                     <div class="card-body">
-                        <div class="d-flex flex-wrap">
-                            <button class="btn btn-secondary command-btn" data-cmd="站立">站立</button>
-                            <button class="btn btn-secondary command-btn" data-cmd="坐下">坐下</button>
-                            <button class="btn btn-secondary command-btn" data-cmd="平衡站">平衡站</button>
+                        <div class="d-flex flex-wrap gap-2">
+                            <button class="btn btn-secondary command-btn" data-cmd="站立"><i class="bi bi-person-standing"></i> 站立</button>
+                            <button class="btn btn-secondary command-btn" data-cmd="坐下"><i class="bi bi-person"></i> 坐下</button>
+                            <button class="btn btn-secondary command-btn" data-cmd="平衡站"><i class="bi bi-universal-access"></i> 平衡站</button>
                         </div>
                     </div>
                 </div>
@@ -117,20 +206,24 @@
                     <div class="card-body">
                         <ul class="list-group">
                             <li class="list-group-item d-flex justify-content-between">
-                                <span>运行状态:</span>
+                                <span><i class="bi bi-power"></i> 运行状态:</span>
                                 <span id="runningStatus">-</span>
                             </li>
                             <li class="list-group-item d-flex justify-content-between">
-                                <span>网络状态:</span>
+                                <span><i class="bi bi-wifi"></i> 网络状态:</span>
                                 <span id="networkStatus">-</span>
                             </li>
                             <li class="list-group-item d-flex justify-content-between">
-                                <span>工作模式:</span>
+                                <span><i class="bi bi-gear"></i> 工作模式:</span>
                                 <span id="workMode">-</span>
                             </li>
                             <li class="list-group-item d-flex justify-content-between">
-                                <span>自动拍照:</span>
+                                <span><i class="bi bi-camera"></i> 自动拍照:</span>
                                 <span id="autoPhotoStatus">关闭</span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between">
+                                <span><i class="bi bi-mic"></i> 语音识别:</span>
+                                <span id="asrStatus">离线</span>
                             </li>
                         </ul>
                     </div>
@@ -141,10 +234,145 @@
 
     <script src="static/bootstrap.bundle.min.js"></script>
     <script src="static/socket.io.js"></script>
+    
     <script>
         const socket = io();
         let autoPhotoInterval = null;
         let lastPhotoTime = 0;
+        let recognition;
+        let isListening = false;
+        
+        // 初始化语音识别
+        function initSpeechRecognition() {
+            try {
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                if (!SpeechRecognition) {
+                    throw new Error('浏览器不支持语音识别');
+                }
+                
+                recognition = new SpeechRecognition();
+                recognition.continuous = true;
+                recognition.interimResults = true;
+                recognition.lang = 'zh-CN';
+                
+                recognition.onstart = function() {
+                    console.log('语音识别开始');
+                    document.getElementById('voiceInputStatus').textContent = '正在监听...';
+                    document.getElementById('micBtn').classList.add('active');
+                    document.getElementById('asrStatus').textContent = '在线';
+                    document.getElementById('voiceStatus').className = 'badge bg-success status-badge';
+                    document.getElementById('voiceStatus').textContent = '识别中';
+                    isListening = true;
+                };
+                
+                recognition.onend = function() {
+                    console.log('语音识别结束');
+                    document.getElementById('voiceInputStatus').textContent = '准备就绪';
+                    document.getElementById('micBtn').classList.remove('active');
+                    document.getElementById('voiceStatus').className = 'badge bg-secondary status-badge';
+                    document.getElementById('voiceStatus').textContent = '待命';
+                    isListening = false;
+                    
+                    // 如果开启了自动监听，重新启动
+                    if (document.getElementById('autoListenCheck').checked) {
+                        setTimeout(startListening, 500);
+                    }
+                };
+                
+                recognition.onresult = function(event) {
+                    let interimTranscript = '';
+                    let finalTranscript = '';
+                    
+                    for (let i = event.resultIndex; i < event.results.length; i++) {
+                        const transcript = event.results[i][0].transcript;
+                        if (event.results[i].isFinal) {
+                            finalTranscript += transcript;
+                        } else {
+                            interimTranscript += transcript;
+                        }
+                    }
+                    
+                    // 显示临时识别结果
+                    if (interimTranscript) {
+                        document.getElementById('textInput').value = interimTranscript;
+                    }
+                    
+                    // 发送最终识别结果
+                    if (finalTranscript) {
+                        document.getElementById('textInput').value = finalTranscript;
+                        sendUserMessage(finalTranscript);
+                    }
+                };
+                
+                recognition.onerror = function(event) {
+                    console.error('语音识别错误:', event.error);
+                    addBotMessage('语音识别错误: ' + event.error);
+                    document.getElementById('asrStatus').textContent = '错误';
+                    document.getElementById('voiceStatus').className = 'badge bg-danger status-badge';
+                    document.getElementById('voiceStatus').textContent = '识别错误';
+                };
+                
+                console.log('语音识别初始化成功');
+                
+            } catch (e) {
+                console.error('语音识别初始化失败:', e);
+                document.getElementById('micBtn').disabled = true;
+                document.getElementById('asrStatus').textContent = '不支持';
+                document.getElementById('voiceStatus').className = 'badge bg-danger status-badge';
+                document.getElementById('voiceStatus').textContent = '不可用';
+                addBotMessage('错误: 您的浏览器不支持语音识别功能');
+            }
+        }
+        
+        // 开始监听语音
+        function startListening() {
+            if (recognition && !isListening) {
+                try {
+                    recognition.start();
+                } catch (e) {
+                    console.error('语音识别启动失败:', e);
+                    addBotMessage('语音识别启动失败，请刷新页面重试');
+                }
+            }
+        }
+        
+        // 停止监听语音
+        function stopListening() {
+            if (recognition && isListening) {
+                recognition.stop();
+            }
+        }
+        
+        // 添加用户消息到聊天框
+        function addUserMessage(message) {
+            const chatBox = document.getElementById('chatBox');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message user-message';
+            messageDiv.innerHTML = `<i class="bi bi-person"></i> ${message}`;
+            chatBox.appendChild(messageDiv);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+        
+        // 添加机器人消息到聊天框
+        function addBotMessage(message) {
+            const chatBox = document.getElementById('chatBox');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message bot-message';
+            messageDiv.innerHTML = `<i class="bi bi-robot"></i> ${message}`;
+            chatBox.appendChild(messageDiv);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+        
+        // 发送用户消息
+        function sendUserMessage(message) {
+            if (!message.trim()) return;
+            
+            addUserMessage(message);
+            document.getElementById('textInput').value = '';
+            
+            // 通过Socket.IO发送消息
+            socket.emit('user_message', { message: message });
+        }
         
         // 加载最新照片
         function loadLatestPhoto() {
@@ -163,12 +391,16 @@
                 img.style.opacity = '1';
                 lastPhotoTime = timestamp;
                 updatePhotoTime();
+                document.getElementById('cameraStatus').className = 'badge bg-success status-badge';
+                document.getElementById('cameraStatus').textContent = '摄像头在线';
             };
             
             img.onerror = function() {
                 img.src = '';
                 img.alt = '图片加载失败';
                 img.style.opacity = '1';
+                document.getElementById('cameraStatus').className = 'badge bg-danger status-badge';
+                document.getElementById('cameraStatus').textContent = '摄像头离线';
             };
         }
         
@@ -189,20 +421,12 @@
                         data.network ? '在线' : '离线';
                     document.getElementById('workMode').textContent = 
                         data.mode === 'debug' ? '调试模式' : '正常模式';
+                })
+                .catch(error => {
+                    console.error('状态更新失败:', error);
                 });
             
             setTimeout(updateStatus, 5000);
-        }
-        
-        // 发送命令
-        function sendCommand(command) {
-            fetch('/command', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({command: command})
-            });
         }
         
         // 切换自动拍照
@@ -213,67 +437,122 @@
             if (autoPhotoInterval) {
                 clearInterval(autoPhotoInterval);
                 autoPhotoInterval = null;
-                btn.textContent = '开启自动拍照';
+                btn.innerHTML = '<i class="bi bi-play"></i> 开启自动拍照';
                 btn.classList.remove('btn-success');
                 btn.classList.add('btn-secondary');
                 document.getElementById('autoPhotoStatus').textContent = '关闭';
             } else {
                 // 立即拍一张
-                sendCommand('拍照');
+                socket.emit('take_photo');
                 
                 // 设置定时器
                 autoPhotoInterval = setInterval(() => {
-                    sendCommand('拍照');
+                    socket.emit('take_photo');
                 }, interval);
                 
-                btn.textContent = '停止自动拍照';
+                btn.innerHTML = '<i class="bi bi-pause"></i> 停止自动拍照';
                 btn.classList.remove('btn-secondary');
                 btn.classList.add('btn-success');
                 document.getElementById('autoPhotoStatus').textContent = `${interval/1000}秒间隔`;
             }
         }
         
-        // 事件监听
-        document.querySelectorAll('.command-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                sendCommand(btn.dataset.cmd);
+        // 初始化事件监听
+        function initEventListeners() {
+            // 发送文本消息
+            document.getElementById('sendTextBtn').addEventListener('click', function() {
+                const message = document.getElementById('textInput').value;
+                sendUserMessage(message);
             });
-        });
-        
-        document.getElementById('takePhotoBtn').addEventListener('click', () => {
-            sendCommand('拍照');
-        });
-        
-        document.getElementById('toggleAutoPhotoBtn').addEventListener('click', toggleAutoPhoto);
-        
-        document.getElementById('photoInterval').addEventListener('change', function() {
-            if (autoPhotoInterval) {
-                clearInterval(autoPhotoInterval);
-                const interval = parseInt(this.value);
-                autoPhotoInterval = setInterval(() => {
-                    sendCommand('拍照');
-                }, interval);
-                document.getElementById('autoPhotoStatus').textContent = `${interval/1000}秒间隔`;
+            
+            // 回车键发送
+            document.getElementById('textInput').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    const message = this.value;
+                    sendUserMessage(message);
+                }
+            });
+            
+            // 语音输入按钮
+            document.getElementById('micBtn').addEventListener('click', function() {
+                if (isListening) {
+                    stopListening();
+                } else {
+                    startListening();
+                }
+            });
+
+// 自动监听复选框
+        document.getElementById('autoListenCheck').addEventListener('change', function() {
+            if (this.checked) {
+                startListening();
+            } else {
+                stopListening();
             }
         });
-        
-        // Socket.IO 事件
-        socket.on('new_photo', (data) => {
+
+        // 拍照按钮
+        document.getElementById('takePhotoBtn').addEventListener('click', function() {
+            socket.emit('take_photo');
+            addUserMessage("执行: 拍照");
+        });
+
+        // 运动控制按钮
+        document.querySelectorAll('.command-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const command = this.getAttribute('data-cmd');
+                socket.emit('command', { command: command });
+                addUserMessage(`执行: ${command}`);
+            });
+        });
+    }
+
+    // Socket.IO 事件监听
+    function initSocketListeners() {
+        // 接收TTS消息
+        socket.on('tts_message', function(data) {
+            addBotMessage(data.message);
+        });
+
+        // 接收新照片通知
+        socket.on('new_photo', function(data) {
             loadLatestPhoto();
         });
-        
-        // 初始化
-        document.addEventListener('DOMContentLoaded', () => {
-            loadLatestPhoto();
-            updateStatus();
-            
-            // 每10秒检查一次照片更新，防止socket.io断开
-            setInterval(() => {
-                if (!autoPhotoInterval && Date.now() - lastPhotoTime > 15000) {
-                    loadLatestPhoto();
-                }
-            }, 10000);
+
+        // 接收系统状态更新
+        socket.on('status_update', function(data) {
+            document.getElementById('runningStatus').textContent = data.running ? '运行中' : '已停止';
+            document.getElementById('networkStatus').textContent = data.network ? '在线' : '离线';
+            document.getElementById('workMode').textContent = data.mode === 'debug' ? '调试模式' : '正常模式';
         });
-    </script>
-</body>
-</html>
+
+        // 连接成功
+        socket.on('connect', function() {
+            console.log('已连接到服务器');
+            addBotMessage('系统连接正常');
+        });
+
+        // 连接断开
+        socket.on('disconnect', function() {
+            console.log('与服务器断开连接');
+            addBotMessage('警告: 与服务器失去连接');
+        });
+    }
+
+    // 初始化
+    document.addEventListener('DOMContentLoaded', function() {
+        initSpeechRecognition();
+        initEventListeners();
+        initSocketListeners();
+        updateStatus();
+        loadLatestPhoto();
+
+        // 每10秒检查一次照片更新
+        setInterval(() => {
+            if (!autoPhotoInterval && Date.now() - lastPhotoTime > 15000) {
+                loadLatestPhoto();
+            }
+        }, 10000);
+    });
+</script>
+</body> </html> 
