@@ -57,13 +57,13 @@ class WebInterface:
     
     def get_photos(self):
         photos = []
-        for f in os.listdir('static/photos'):
-            if f.endswith('.jpg'):
-                photos.append({
-                    'filename': f,
-                    'timestamp': os.path.getmtime(f'static/photos/{f}'),
-                    'url': f'/photo/{f}'
-                })
+        photo_path = 'static/photos/photo.jpg'
+        if os.path.exists(photo_path):
+            photos.append({
+                'filename': 'photo.jpg',
+                'timestamp': os.path.getmtime(photo_path),
+                'url': '/photo/photo.jpg'
+            })
         return jsonify(sorted(photos, key=lambda x: x['timestamp'], reverse=True))
     
     def get_photo(self, filename):
@@ -88,7 +88,7 @@ class WebInterface:
         self.socketio.run(self.app, host=self.host, port=self.port)
     
     def save_photo(self, image_data):
-        filename = f"photo.jpg"
+        filename = "photo.jpg"
         path = f"static/photos/{filename}"
         with open(path, 'wb') as f:
             f.write(image_data)
