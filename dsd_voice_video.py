@@ -82,6 +82,23 @@ class WebInterface:
             threading.Thread(target=self._auto_photo_worker, daemon=True).start()
             print(f"自动拍照已启用，默认间隔: {self.photo_interval}ms")
             
+    def _auto_photo_worker(self):
+        """自动拍照工作线程"""
+        while self.auto_photo_enabled and hasattr(self, 'voice_controller'):
+            start_time = time.time()
+            
+            try:
+                # 执行拍照
+                self.voice_controller.handle_take_photo()
+                
+                # 计算剩余等待时间
+                elapsed = (time.time() - start_time) * 1000
+                remaining = max(0, self.photo_interval - elapsed)
+                time.sleep(remaining / 1000)
+            except Exception as e:
+                print(f"自动拍照出错: {str(e)}")
+                time.sleep(1)  # 出错后等待1秒再重试
+                
     def send_tts_message(self, message):
         """发送TTS消息到前端"""
         self.socketio.emit('tts_message', {'message': message})
