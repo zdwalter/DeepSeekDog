@@ -37,7 +37,9 @@ class WebInterface:
         self.voice_controller = voice_controller
         self.host = host
         self.port = port
-        
+        # 自动拍照状态 - 默认启用
+        self.auto_photo_enabled = True  # 默认启用自动拍照
+        self.photo_interval = 3000  # 默认3秒间隔        
         # 设置路由
         self.app.add_url_rule('/', 'index', self.index)
         self.app.add_url_rule('/photos', 'get_photos', self.get_photos, methods=['GET'])
@@ -46,6 +48,9 @@ class WebInterface:
         
         # 创建必要的目录
         os.makedirs('static/photos', exist_ok=True)
+
+        # 启动自动拍照线程
+        self._start_auto_photo()
         
         # 启动Web服务器线程
         self.server_thread = threading.Thread(target=self.run_server, daemon=True)
@@ -71,7 +76,12 @@ class WebInterface:
                 # 将控制指令放入命令队列
                 self.voice_controller.cmd_queue.put(command)
 
-                
+    def _start_auto_photo(self):
+        """启动自动拍照线程"""
+        if self.auto_photo_enabled:
+            threading.Thread(target=self._auto_photo_worker, daemon=True).start()
+            print(f"自动拍照已启用，默认间隔: {self.photo_interval}ms")
+            
     def send_tts_message(self, message):
         """发送TTS消息到前端"""
         self.socketio.emit('tts_message', {'message': message})
