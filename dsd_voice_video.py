@@ -30,7 +30,6 @@ import os
 import time
 
 
-        
 class WebInterface:
     def __init__(self, voice_controller, host='0.0.0.0', port=5000):
         self.app = Flask(__name__, template_folder='templates', static_folder='static')
@@ -43,7 +42,6 @@ class WebInterface:
         self.app.add_url_rule('/', 'index', self.index)
         self.app.add_url_rule('/photos', 'get_photos', self.get_photos, methods=['GET'])
         self.app.add_url_rule('/photo/<filename>', 'get_photo', self.get_photo)
-        self.app.add_url_rule('/command', 'send_command', self.send_command, methods=['POST'])
         self.app.add_url_rule('/status', 'get_status', self.get_status, methods=['GET'])
         
         # 创建必要的目录
@@ -52,6 +50,7 @@ class WebInterface:
         # 启动Web服务器线程
         self.server_thread = threading.Thread(target=self.run_server, daemon=True)
         self.server_thread.start()
+        
         # 添加Socket.IO事件处理
         @self.socketio.on('user_message')
         def handle_user_message(data):
@@ -59,8 +58,18 @@ class WebInterface:
             if message:
                 # 将用户消息放入命令队列
                 self.voice_controller.cmd_queue.put(message)
-                # 可以在这里添加直接回复的逻辑
-        
+                
+        @self.socketio.on('take_photo')
+        def handle_take_photo():
+            # 将拍照指令放入命令队列
+            self.voice_controller.cmd_queue.put("拍照")
+            
+        @self.socketio.on('command')
+        def handle_command(data):
+            command = data.get('command', '').strip()
+            if command:
+                # 将控制指令放入命令队列
+                self.voice_controller.cmd_queue.put(command)
 
                 
     def send_tts_message(self, message):
@@ -84,13 +93,7 @@ class WebInterface:
     
     def get_photo(self, filename):
         return send_from_directory('static/photos', filename)
-    
-    def send_command(self):
-        command = request.json.get('command')
-        if command:
-            self.voice_controller.cmd_queue.put(command)
-            return jsonify({'status': 'success'})
-        return jsonify({'status': 'error', 'message': 'No command provided'}), 400
+
     
     def get_status(self):
         return jsonify({
