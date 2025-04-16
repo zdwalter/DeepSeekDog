@@ -61,12 +61,7 @@ class WebInterface:
                 self.voice_controller.cmd_queue.put(message)
                 # 可以在这里添加直接回复的逻辑
         
-        @self.socketio.on('command')
-        def handle_command(data):
-            command = data.get('command', '').strip()
-            if command:
-                print(f"Received command from web: {command}")  # 调试输出
-                self.voice_controller.cmd_queue.put(command)
+
                 
     def send_tts_message(self, message):
         """发送TTS消息到前端"""
