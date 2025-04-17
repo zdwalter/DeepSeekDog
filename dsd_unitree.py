@@ -75,68 +75,105 @@ class LidarProcessor:
             self.latest_cloud_data = cloud_data
             self._process_point_cloud(cloud_data)
 
-    def _process_point_cloud(self, cloud_data):
-        """处理点云数据并生成ASCII可视化（忽略高度>0.5m的点）"""
+    def _process_point_cloud(self, cloud_data: 'PointCloud2_'):
+        """严格遵循PointCloud2_定义的点云处理器"""
         try:
-            front_points = []
-            point_step = cloud_data.point_step
-            data = cloud_data.data
+            # 1. 基础校验
+            if not cloud_data.fields or len(cloud_data.data) == 0:
+                raise ValueError("空点云数据")
             
-            # ASCII网格参数
-            grid_width, grid_height = 40, 20  # 加宽横向显示范围
-            ascii_grid = [[' ' for _ in range(grid_width)] for _ in range(grid_height)]
+            # 2. 准备ASCII显示网格
+            grid_cols, grid_rows = 60, 20
+            grid = [['·' for _ in range(grid_cols)] for _ in range(grid_rows)]
             
-            # 检测范围（单位：米）
-            max_distance = 3.0   # 最远检测3米
-            lateral_range = 2.0  # 左右各检测2米
-            max_height = 0.5     # 忽略高度>0.5m的点
-    
-            # 解析点云字段格式（假设x,y,z是连续的double类型）
-            for i in range(0, len(data), point_step):
-                # 解析double类型的x,y,z（每个占8字节）
-                x = np.frombuffer(data[i:i+8], dtype=np.float64)[0]    # 前方距离
-                y = np.frombuffer(data[i+8:i+16], dtype=np.float64)[0] # 左右位置
-                z = np.frombuffer(data[i+16:i+24], dtype=np.float64)[0] # 高度
-    
-                # 忽略高处物体和后方点
-                if z > max_height or x <= 0 or x > max_distance or abs(y) > lateral_range:
-                    continue
-    
-                front_points.append((x, y, z))
+            # 3. 解析字段配置
+            field_config = {}
+            byte_order = 'big' if cloud_data.is_bigendian else 'little'
+            
+            for field in cloud_data.fields:
+                dtype = {
+                    1: ('uint8', 1),   # UINT8
+                    2: ('int8', 1),    # INT8
+                    3: ('uint16', 2),  # UINT16
+                    4: ('int16', 2),   # INT16
+                    5: ('uint32', 4),  # UINT32
+                    6: ('int32', 4),   # INT32
+                    7: ('float32', 4), # FLOAT32
+                    8: ('float64', 8)  # FLOAT64
+                }.get(field.datatype)
                 
-                # 映射到ASCII网格（下方代码保持和之前一致）
-                grid_x = int((y + lateral_range) * grid_width / (2 * lateral_range))
-                grid_y = int(x * grid_height / max_distance)
-                
-                if 0 <= grid_x < grid_width and 0 <= grid_y < grid_height:
-                    char = '#' if x < 1.0 else '.'  # 简化显示符号
-                    ascii_grid[grid_y][grid_x] = char
+                if not dtype:
+                    raise ValueError(f"不支持的字段类型: {field.datatype}")
+                    
+                field_config[field.name.lower()] = {
+                    'offset': field.offset,
+                    'dtype': dtype[0],
+                    'size': dtype[1],
+                    'count': field.count
+                }
     
-            # --- ASCII可视化增强 ---
-            # 添加坐标轴和刻度（显示实际米数）
-            for i in range(grid_height):
-                ascii_grid[i][grid_width//2] = '|'  # 中央轴线
-            ascii_grid[-1] = ['-' if c == ' ' else c for c in ascii_grid[-1]]  # 底部距离标尺
+            # 4. 坐标字段检查
+            coord_fields = ['x', 'y', 'z']
+            for axis in coord_fields:
+                if axis not in field_config:
+                    raise ValueError(f"缺失坐标字段: {axis}")
+    
+            # 5. 处理每个点
+            valid_points = []
+            for i in range(0, len(cloud_data.data), cloud_data.point_step):
+                point = {}
+                for axis in coord_fields:
+                    cfg = field_config[axis]
+                    start = i + cfg['offset']
+                    end = start + cfg['size']
+                    chunk = cloud_data.data[start:end]
+                    
+                    # 字节序敏感解析
+                    value = int.from_bytes(chunk, byteorder=byte_order, signed=cfg['dtype'].startswith('i'))
+                    
+                    # 类型转换
+                    if 'float' in cfg['dtype']:
+                        value = np.frombuffer(chunk, dtype=cfg['dtype'])[0]
+                    
+                    point[axis] = float(value)
+    
+                # 坐标过滤 (单位: 米)
+                if (0 < point['x'] <= 3.0 and       # 前方0-3米
+                    abs(point['y']) <= 2.0 and      # 左右2米范围
+                    point['z'] <= 0.5):             # 高度0.5米以下
+                    
+                    valid_points.append(point)
+                    
+                    # 映射到ASCII网格
+                    col = int((point['y'] + 2.0) * grid_cols / 4.0)
+                    row = int(point['x'] * grid_rows / 3.0)
+                    
+                    if 0 <= row < grid_rows and 0 <= col < grid_cols:
+                        char = ('#', '*', '.')[min(2, int(point['x']))]
+                        grid[row][col] = char
+    
+            # 6. 生成可视化
+            visual = [
+                "\n 前方障碍物分布 (Z≤0.5m)",
+                " Y(左右)",
+                "   ↑   ",
+                "   |   " + "".join(grid[0]),
+                *[f"{'%.1fm|'%(3.0-i*0.15):<6}" + "".join(row) for i, row in enumerate(grid)],
+                "   +" + "-"*(grid_cols-3) + "→ X(前方)",
+                f" 最近障碍物: {min(p['x'] for p in valid_points):.2f}m" if valid_points else " 无有效障碍物"
+            ]
             
-            # 生成可视化文本
-            visual_text = "\n前方障碍物俯视图（忽略高度>0.5m的物体）:\n"
-            visual_text += f"Y(左右) ↑ {'→ X(前方)':^{grid_width-10}}\n"
-            
-            for row in ascii_grid:
-                visual_text += ''.join(row) + '\n'
-            
-            # 添加距离标记
-            visual_text += f"0m{' '*(grid_width//2-2)}{max_distance/2:.1f}m{' '*(grid_width//2-5)}{max_distance}m\n"
-            visual_text += f"最近障碍物: {min(front_points)[0]:.2f}m" if front_points else "未检测到有效障碍物"
-            
-            print(visual_text)
-            
-            # 更新最近障碍物距离（只考虑高度<0.5m的点）
-            self.obstacle_distance = min(front_points)[0] if front_points else None
+            # 彩色显示
+            print("\n".join(visual).replace('#', '\033[91m#\033[0m')
+                                   .replace('*', '\033[93m*\033[0m')
+                                   .replace('.', '\033[92m.\033[0m'))
+    
+            # 7. 更新状态
+            self.obstacle_distance = min(p['x'] for p in valid_points) if valid_points else None
             self.scan_complete = True
     
         except Exception as e:
-            print(f"点云处理错误: {str(e)}")
+            print(f"点云处理异常: {type(e).__name__}: {str(e)}")
             self.obstacle_distance = None
             self.scan_complete = False
         
