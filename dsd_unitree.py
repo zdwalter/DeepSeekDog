@@ -216,7 +216,7 @@ class LidarProcessor:
             ax.set_zlabel("Z (m)")
             ax.set_title("Point Cloud")
             plt.tight_layout()
-            plt.savefig("point_cloud.jpg", dpi=300)
+            plt.savefig("static/photos/point_cloud.jpg", dpi=300)
             plt.close(fig)
         except Exception as exc:
             print(f"点云图片保存失败: {exc}")
