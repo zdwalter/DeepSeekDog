@@ -27,6 +27,12 @@ from flask import Flask, jsonify, render_template, send_from_directory
 from flask_socketio import SocketIO
 from vosk import KaldiRecognizer, Model
 
+# ---------- 新增：Matplotlib 用于点云可视化 ----------
+import matplotlib
+matplotlib.use("Agg")          # 无显示环境也能保存图片
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 (触发 3D 投影注册)
+
 # ---------- Unitree‑SDK ----------
 from unitree_sdk2py.core.channel import ChannelFactoryInitialize, ChannelSubscriber
 from unitree_sdk2py.idl.sensor_msgs.msg.dds_ import PointCloud2_
@@ -155,11 +161,12 @@ class LidarProcessor:
                     col = int((point["y"] + 2.0) * grid_cols / 4.0)
                     row = int(point["x"] * grid_rows / 3.0)
                     if 0 <= row < grid_rows and 0 <= col < grid_cols:
-                        grid[row][col] = ("#", "*", ".")[
-                            min(2, int(point["x"]))
-                        ]
+                        grid[row][col] = ("#", "*", ".")[min(2, int(point["x"]))]
 
-            # 6. 可视化输出
+            # ---------- 新增：保存 3D 点云图 ----------
+            self._save_point_cloud_image(valid_points)
+
+            # 6. 可视化输出（终端）
             visual = [
                 "\n 前方障碍物分布 (0.1m< Z ≤0.5m)",
                 " Y(左右)",
@@ -193,6 +200,26 @@ class LidarProcessor:
             print(f"点云处理异常: {type(exc).__name__}: {exc}")
             self.obstacle_distance = None
             self.scan_complete = False
+
+    # ---------- 新增：点云图保存 ----------
+    def _save_point_cloud_image(self, points):
+        """将当前点云保存为 point_cloud.jpg（覆盖式）"""
+        if not points:
+            return
+        try:
+            arr = np.array([[p["x"], p["y"], p["z"]] for p in points])
+            fig = plt.figure(figsize=(6, 4))
+            ax = fig.add_subplot(111, projection="3d")
+            ax.scatter(arr[:, 0], arr[:, 1], arr[:, 2], s=1)
+            ax.set_xlabel("X (m)")
+            ax.set_ylabel("Y (m)")
+            ax.set_zlabel("Z (m)")
+            ax.set_title("Point Cloud")
+            plt.tight_layout()
+            plt.savefig("point_cloud.jpg", dpi=300)
+            plt.close(fig)
+        except Exception as exc:
+            print(f"点云图片保存失败: {exc}")
 
     # ---------- 后台线程 ----------
     def _lidar_worker(self):
