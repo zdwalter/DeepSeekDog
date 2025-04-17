@@ -76,12 +76,16 @@ class LidarProcessor:
             self._process_point_cloud(cloud_data)
 
     def _process_point_cloud(self, cloud_data):
-        """处理点云数据"""
+        """处理点云数据并生成ASCII可视化"""
         try:
             # 简化的前方障碍物检测
             front_points = []
             point_step = cloud_data.point_step
             data = cloud_data.data
+            
+            # 创建ASCII网格 (20x20)
+            grid_size = 20
+            ascii_grid = [[' ' for _ in range(grid_size)] for _ in range(grid_size)]
             
             # 假设点云数据结构为x,y,z坐标连续存储
             for i in range(0, len(data), point_step):
@@ -93,6 +97,34 @@ class LidarProcessor:
                 # 只考虑正前方1米范围内且横向0.5米内的点
                 if z > 0 and z < 1.0 and abs(x) < 0.5:
                     front_points.append(z)
+                    
+                    # 将点映射到ASCII网格
+                    grid_x = int((x + 0.5) * grid_size / 1.0)  # x: -0.5~0.5 -> 0~grid_size
+                    grid_z = int(z * grid_size / 1.0)          # z: 0~1.0 -> 0~grid_size
+                    
+                    # 确保坐标在网格范围内
+                    if 0 <= grid_x < grid_size and 0 <= grid_z < grid_size:
+                        # 根据距离使用不同字符表示
+                        if z < 0.3:
+                            char = '#'  # 近距离障碍物
+                        elif z < 0.6:
+                            char = '*'  # 中距离障碍物
+                        else:
+                            char = '.'  # 远距离障碍物
+                        ascii_grid[grid_z][grid_x] = char
+            
+            # 添加坐标轴标记
+            for i in range(grid_size):
+                ascii_grid[i][0] = '|'  # 左侧边界
+                ascii_grid[grid_size-1][i] = '-'  # 底部边界
+            
+            # 生成ASCII可视化字符串
+            ascii_art = "前方障碍物分布 (上远下近，左负右正):\n"
+            for row in reversed(ascii_grid):  # 反转使近处显示在下方
+                ascii_art += ''.join(row) + '\n'
+            ascii_art += "图例: #=近距离(0-0.3m) *=中距离(0.3-0.6m) .=远距离(0.6-1.0m)"
+            
+            print(ascii_art)
             
             if front_points:
                 self.obstacle_distance = min(front_points)
