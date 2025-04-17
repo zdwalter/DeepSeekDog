@@ -76,107 +76,70 @@ class LidarProcessor:
             self._process_point_cloud(cloud_data)
 
     def _process_point_cloud(self, cloud_data):
-        """处理点云数据并生成ASCII可视化（支持 double 类型坐标）"""
+        """处理点云数据并生成ASCII可视化（忽略高度>0.5m的点）"""
         try:
-            # 简化的前方障碍物检测
             front_points = []
-            point_step = cloud_data.point_step  # 每个点的字节数
+            point_step = cloud_data.point_step
             data = cloud_data.data
             
-            # 创建ASCII网格 (20x20)
-            grid_size = 20
-            ascii_grid = [[' ' for _ in range(grid_size)] for _ in range(grid_size)]
+            # ASCII网格参数
+            grid_width, grid_height = 40, 20  # 加宽横向显示范围
+            ascii_grid = [[' ' for _ in range(grid_width)] for _ in range(grid_height)]
             
-            # 可视化参数
-            max_distance = 2.0  # 最大显示距离2米
-            lateral_range = 1.0  # 左右各显示1米范围
-            
-            # 检查点云字段格式
-            if len(cloud_data.fields) >= 3:
-                # 假设前三个字段是x,y,z
-                x_offset = cloud_data.fields[0].offset
-                y_offset = cloud_data.fields[1].offset
-                z_offset = cloud_data.fields[2].offset
-                x_datatype = cloud_data.fields[0].datatype
-                y_datatype = cloud_data.fields[1].datatype
-                z_datatype = cloud_data.fields[2].datatype
-            else:
-                raise ValueError("点云数据字段不足")
+            # 检测范围（单位：米）
+            max_distance = 3.0   # 最远检测3米
+            lateral_range = 2.0  # 左右各检测2米
+            max_height = 0.5     # 忽略高度>0.5m的点
     
+            # 解析点云字段格式（假设x,y,z是连续的double类型）
             for i in range(0, len(data), point_step):
-                # 根据实际存储格式解析坐标（double 是 8 字节）
-                if x_datatype == PointField_.FLOAT64:  # double 类型
-                    x = np.frombuffer(data[i+x_offset:i+x_offset+8], dtype=np.float64)[0]
-                elif x_datatype == PointField_.FLOAT32:  # 兼容 float 类型
-                    x = np.frombuffer(data[i+x_offset:i+x_offset+4], dtype=np.float32)[0]
-                else:
-                    raise ValueError(f"不支持的x坐标数据类型: {x_datatype}")
+                # 解析double类型的x,y,z（每个占8字节）
+                x = np.frombuffer(data[i:i+8], dtype=np.float64)[0]    # 前方距离
+                y = np.frombuffer(data[i+8:i+16], dtype=np.float64)[0] # 左右位置
+                z = np.frombuffer(data[i+16:i+24], dtype=np.float64)[0] # 高度
     
-                if y_datatype == PointField_.FLOAT64:
-                    y = np.frombuffer(data[i+y_offset:i+y_offset+8], dtype=np.float64)[0]
-                elif y_datatype == PointField_.FLOAT32:
-                    y = np.frombuffer(data[i+y_offset:i+y_offset+4], dtype=np.float32)[0]
-                else:
-                    raise ValueError(f"不支持的y坐标数据类型: {y_datatype}")
+                # 忽略高处物体和后方点
+                if z > max_height or x <= 0 or x > max_distance or abs(y) > lateral_range:
+                    continue
     
-                if z_datatype == PointField_.FLOAT64:
-                    z = np.frombuffer(data[i+z_offset:i+z_offset+8], dtype=np.float64)[0]
-                elif z_datatype == PointField_.FLOAT32:
-                    z = np.frombuffer(data[i+z_offset:i+z_offset+4], dtype=np.float32)[0]
-                else:
-                    raise ValueError(f"不支持的z坐标数据类型: {z_datatype}")
-    
-                # 只考虑前方2米内、高度0.5米以下的有效点
-                if 0 < x < max_distance and abs(y) < lateral_range and z < 0.5:
-                    front_points.append(x)
-                    
-                    # 将点映射到ASCII网格
-                    grid_x = int((y + lateral_range) * grid_size / (2 * lateral_range))  # y: -1~1 -> 0~grid_size
-                    grid_y = int(x * grid_size / max_distance)  # x: 0~2 -> 0~grid_size
-                    
-                    # 确保坐标在网格范围内
-                    if 0 <= grid_x < grid_size and 0 <= grid_y < grid_size:
-                        # 根据距离使用不同字符表示
-                        if x < 0.5:
-                            char = '#'  # 近距离障碍物(红色)
-                        elif x < 1.0:
-                            char = '*'  # 中距离障碍物(黄色)
-                        else:
-                            char = '.'  # 远距离障碍物(绿色)
-                        ascii_grid[grid_y][grid_x] = char
-            
-            # 添加坐标轴标记
-            for i in range(grid_size):
-                ascii_grid[i][grid_size//2] = '|'  # 中央纵向线
-                ascii_grid[0][i] = '-'  # 顶部横向线
-            
-            # 生成ASCII可视化字符串
-            ascii_art = "\n前方障碍物分布图 (上近下远，左正右负):\n"
-            for row in ascii_grid:
-                ascii_art += ''.join(row) + '\n'
-            
-            ascii_art += f"Y(左右)↑\n"
-            ascii_art += f"0{' '*(grid_size//2-1)}X(前方)→\n"
-            ascii_art += "图例: #=近距离(0-0.5m) *=中距离(0.5-1.0m) .=远距离(1.0-2.0m)\n"
-            ascii_art += f"检测到障碍物数量: {len(front_points)}\n"
-            
-            # 使用ANSI颜色代码增强可读性
-            colored_art = ascii_art.replace('#', '\033[91m#\033[0m')  # 红色
-            colored_art = colored_art.replace('*', '\033[93m*\033[0m')  # 黄色
-            colored_art = colored_art.replace('.', '\033[92m.\033[0m')  # 绿色
-            
-            print(colored_art)
-            
-            if front_points:
-                self.obstacle_distance = min(front_points)
-            else:
-                self.obstacle_distance = None
+                front_points.append((x, y, z))
                 
+                # 映射到ASCII网格（下方代码保持和之前一致）
+                grid_x = int((y + lateral_range) * grid_width / (2 * lateral_range))
+                grid_y = int(x * grid_height / max_distance)
+                
+                if 0 <= grid_x < grid_width and 0 <= grid_y < grid_height:
+                    char = '#' if x < 1.0 else '.'  # 简化显示符号
+                    ascii_grid[grid_y][grid_x] = char
+    
+            # --- ASCII可视化增强 ---
+            # 添加坐标轴和刻度（显示实际米数）
+            for i in range(grid_height):
+                ascii_grid[i][grid_width//2] = '|'  # 中央轴线
+            ascii_grid[-1] = ['-' if c == ' ' else c for c in ascii_grid[-1]]  # 底部距离标尺
+            
+            # 生成可视化文本
+            visual_text = "\n前方障碍物俯视图（忽略高度>0.5m的物体）:\n"
+            visual_text += f"Y(左右) ↑ {'→ X(前方)':^{grid_width-10}}\n"
+            
+            for row in ascii_grid:
+                visual_text += ''.join(row) + '\n'
+            
+            # 添加距离标记
+            visual_text += f"0m{' '*(grid_width//2-2)}{max_distance/2:.1f}m{' '*(grid_width//2-5)}{max_distance}m\n"
+            visual_text += f"最近障碍物: {min(front_points)[0]:.2f}m" if front_points else "未检测到有效障碍物"
+            
+            print(visual_text)
+            
+            # 更新最近障碍物距离（只考虑高度<0.5m的点）
+            self.obstacle_distance = min(front_points)[0] if front_points else None
             self.scan_complete = True
+    
         except Exception as e:
             print(f"点云处理错误: {str(e)}")
             self.obstacle_distance = None
             self.scan_complete = False
+        
     def _lidar_worker(self):
         """LIDAR工作线程"""
         try:
