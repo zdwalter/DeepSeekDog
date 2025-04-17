@@ -87,44 +87,56 @@ class LidarProcessor:
             grid_size = 20
             ascii_grid = [[' ' for _ in range(grid_size)] for _ in range(grid_size)]
             
-            # 假设点云数据结构为x,y,z坐标连续存储
+            # 可视化参数
+            max_distance = 2.0  # 最大显示距离2米
+            lateral_range = 1.0  # 左右各显示1米范围
+            
             for i in range(0, len(data), point_step):
                 # 解析x,y,z坐标（假设为float32类型）
-                x = np.frombuffer(data[i:i+4], dtype=np.float32)[0]
-                y = np.frombuffer(data[i+4:i+8], dtype=np.float32)[0]
-                z = np.frombuffer(data[i+8:i+12], dtype=np.float32)[0]
+                x = np.frombuffer(data[i:i+4], dtype=np.float32)[0]  # 前后
+                y = np.frombuffer(data[i+4:i+8], dtype=np.float32)[0]  # 左右
+                z = np.frombuffer(data[i+8:i+12], dtype=np.float32)[0]  # 高度
                 
-                # 只考虑正前方1米范围内且横向0.5米内的点
-                if z > 0 and z < 1.0 and abs(x) < 0.5:
-                    front_points.append(z)
+                # 只考虑前方2米内、高度0.5米以下的有效点
+                if 0 < x < max_distance and abs(y) < lateral_range and z < 0.5:
+                    front_points.append(x)
                     
                     # 将点映射到ASCII网格
-                    grid_x = int((x + 0.5) * grid_size / 1.0)  # x: -0.5~0.5 -> 0~grid_size
-                    grid_z = int(z * grid_size / 1.0)          # z: 0~1.0 -> 0~grid_size
+                    grid_x = int((y + lateral_range) * grid_size / (2 * lateral_range))  # y: -1~1 -> 0~grid_size
+                    grid_y = int(x * grid_size / max_distance)  # x: 0~2 -> 0~grid_size
                     
                     # 确保坐标在网格范围内
-                    if 0 <= grid_x < grid_size and 0 <= grid_z < grid_size:
+                    if 0 <= grid_x < grid_size and 0 <= grid_y < grid_size:
                         # 根据距离使用不同字符表示
-                        if z < 0.3:
-                            char = '#'  # 近距离障碍物
-                        elif z < 0.6:
-                            char = '*'  # 中距离障碍物
+                        if x < 0.5:
+                            char = '#'  # 近距离障碍物(红色)
+                        elif x < 1.0:
+                            char = '*'  # 中距离障碍物(黄色)
                         else:
-                            char = '.'  # 远距离障碍物
-                        ascii_grid[grid_z][grid_x] = char
+                            char = '.'  # 远距离障碍物(绿色)
+                        ascii_grid[grid_y][grid_x] = char
             
             # 添加坐标轴标记
             for i in range(grid_size):
-                ascii_grid[i][0] = '|'  # 左侧边界
-                ascii_grid[grid_size-1][i] = '-'  # 底部边界
+                ascii_grid[i][grid_size//2] = '|'  # 中央纵向线
+                ascii_grid[0][i] = '-'  # 顶部横向线
             
             # 生成ASCII可视化字符串
-            ascii_art = "前方障碍物分布 (上远下近，左负右正):\n"
-            for row in reversed(ascii_grid):  # 反转使近处显示在下方
+            ascii_art = "\n前方障碍物分布图 (上近下远，左正右负):\n"
+            for row in ascii_grid:
                 ascii_art += ''.join(row) + '\n'
-            ascii_art += "图例: #=近距离(0-0.3m) *=中距离(0.3-0.6m) .=远距离(0.6-1.0m)"
             
-            print(ascii_art)
+            ascii_art += f"Y(左右)↑\n"
+            ascii_art += f"0{' '*(grid_size//2-1)}X(前方)→\n"
+            ascii_art += "图例: #=近距离(0-0.5m) *=中距离(0.5-1.0m) .=远距离(1.0-2.0m)\n"
+            ascii_art += f"检测到障碍物数量: {len(front_points)}\n"
+            
+            # 使用ANSI颜色代码增强可读性
+            colored_art = ascii_art.replace('#', '\033[91m#\033[0m')  # 红色
+            colored_art = colored_art.replace('*', '\033[93m*\033[0m')  # 黄色
+            colored_art = colored_art.replace('.', '\033[92m.\033[0m')  # 绿色
+            
+            print(colored_art)
             
             if front_points:
                 self.obstacle_distance = min(front_points)
