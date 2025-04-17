@@ -140,7 +140,7 @@ class LidarProcessor:
                 # 坐标过滤 (单位: 米)
                 if (0 < point['x'] <= 3.0 and       # 前方0-3米
                     abs(point['y']) <= 2.0 and      # 左右2米范围
-                    point['z'] <= 0.5):             # 高度0.5米以下
+                    0.1 <= point['z'] <= 0.5):             # 高度0.5米以下,0.1米以上
                     
                     valid_points.append(point)
                     
@@ -154,7 +154,7 @@ class LidarProcessor:
     
             # 6. 生成可视化
             visual = [
-                "\n 前方障碍物分布 (Z≤0.5m)",
+                "\n 前方障碍物分布 (0.1≤Z≤0.5m)",
                 " Y(左右)",
                 "   ↑   ",
                 "   |   " + "".join(grid[0]),
