@@ -149,7 +149,7 @@ class LidarProcessor:
                 if (
                     0 < point["x"] <= 3.0
                     and abs(point["y"]) <= 2.0
-                    and point["z"] <= 0.5
+                    and 0.1 < point["z"] <= 0.5
                 ):
                     valid_points.append(point)
                     col = int((point["y"] + 2.0) * grid_cols / 4.0)
@@ -161,7 +161,7 @@ class LidarProcessor:
 
             # 6. 可视化输出
             visual = [
-                "\n 前方障碍物分布 (Z≤0.5m)",
+                "\n 前方障碍物分布 (0.1m< Z ≤0.5m)",
                 " Y(左右)",
                 "   ↑",
                 "   |   " + "".join(grid[0]),
