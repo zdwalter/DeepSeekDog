@@ -791,11 +791,11 @@ class VoiceControl:
             self.cleanup_resources()
             print("程序已安全退出")
           
-if name == "main":
+if __name__ == "__main__":
     if len(sys.argv) < 2:
         print(f"Usage: python3 {sys.argv[0]} networkInterface")
         sys.exit(-1)
-    
+
     ChannelFactoryInitialize(0, sys.argv[1])
     
     try:
