@@ -93,6 +93,13 @@
                 height: 200px;
             }
         }
+        #currentPhoto {
+            position: relative;
+            min-height: 300px; /* 保持固定高度防止布局抖动 */
+        }
+        #latestPhoto {
+            transition: opacity 0.5s ease-in-out;
+        }
     </style>
 </head>
 <body>
@@ -377,31 +384,58 @@
         // 加载最新照片
         function loadLatestPhoto() {
             const timestamp = new Date().getTime();
-            const img = document.getElementById('latestPhoto');
+            const container = document.getElementById('currentPhoto');
+            const oldImg = document.getElementById('latestPhoto');
             
-            // 添加加载动画
-            img.style.opacity = '0.5';
-            img.style.transition = 'opacity 0.3s';
-            
-            // 设置新的图片源（带时间戳防止缓存）
-            img.src = `/photo/photo.jpg?t=${timestamp}`;
-            
-            // 图片加载完成后恢复透明度
-            img.onload = function() {
-                img.style.opacity = '1';
+            // 创建新图片元素
+            const newImg = new Image();
+            newImg.id = 'latestPhoto';
+            newImg.className = 'img-fluid';
+            newImg.style.maxHeight = '300px';
+            newImg.style.position = 'absolute';
+            newImg.style.opacity = '0';
+            newImg.style.transition = 'opacity 0.5s ease-in-out';
+        
+            // 预加载新图片
+            newImg.onload = function() {
+                // 淡入新图片
+                newImg.style.opacity = '1';
+                
+                // 移除旧图片（延迟确保过渡完成）
+                setTimeout(() => {
+                    if (oldImg.parentNode === container) {
+                        container.removeChild(oldImg);
+                    }
+                }, 500);
+        
                 lastPhotoTime = timestamp;
                 updatePhotoTime();
                 document.getElementById('cameraStatus').className = 'badge bg-success status-badge';
                 document.getElementById('cameraStatus').textContent = '摄像头在线';
             };
-            
-            img.onerror = function() {
-                img.src = '';
-                img.alt = '图片加载失败';
-                img.style.opacity = '1';
+        
+            newImg.onerror = function() {
+                container.removeChild(newImg);
+                console.error('图片加载失败');
                 document.getElementById('cameraStatus').className = 'badge bg-danger status-badge';
                 document.getElementById('cameraStatus').textContent = '摄像头离线';
             };
+        
+            // 设置新图片源
+            newImg.src = `/photo/photo.jpg?t=${timestamp}`;
+            
+            // 设置容器定位样式
+            container.style.position = 'relative';
+            
+            // 添加新图片到容器
+            container.appendChild(newImg);
+        
+            // 设置旧图片淡出
+            if (oldImg) {
+                oldImg.style.position = 'absolute';
+                oldImg.style.opacity = '0';
+                oldImg.style.transition = 'opacity 0.5s ease-in-out';
+            }
         }
         
         // 更新照片时间显示
