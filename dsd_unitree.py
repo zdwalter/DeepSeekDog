@@ -76,11 +76,11 @@ class LidarProcessor:
             self._process_point_cloud(cloud_data)
 
     def _process_point_cloud(self, cloud_data):
-        """处理点云数据并生成ASCII可视化"""
+        """处理点云数据并生成ASCII可视化（支持 double 类型坐标）"""
         try:
             # 简化的前方障碍物检测
             front_points = []
-            point_step = cloud_data.point_step
+            point_step = cloud_data.point_step  # 每个点的字节数
             data = cloud_data.data
             
             # 创建ASCII网格 (20x20)
@@ -91,12 +91,41 @@ class LidarProcessor:
             max_distance = 2.0  # 最大显示距离2米
             lateral_range = 1.0  # 左右各显示1米范围
             
+            # 检查点云字段格式
+            if len(cloud_data.fields) >= 3:
+                # 假设前三个字段是x,y,z
+                x_offset = cloud_data.fields[0].offset
+                y_offset = cloud_data.fields[1].offset
+                z_offset = cloud_data.fields[2].offset
+                x_datatype = cloud_data.fields[0].datatype
+                y_datatype = cloud_data.fields[1].datatype
+                z_datatype = cloud_data.fields[2].datatype
+            else:
+                raise ValueError("点云数据字段不足")
+    
             for i in range(0, len(data), point_step):
-                # 解析x,y,z坐标（假设为float32类型）
-                x = np.frombuffer(data[i:i+4], dtype=np.float32)[0]  # 前后
-                y = np.frombuffer(data[i+4:i+8], dtype=np.float32)[0]  # 左右
-                z = np.frombuffer(data[i+8:i+12], dtype=np.float32)[0]  # 高度
-                
+                # 根据实际存储格式解析坐标（double 是 8 字节）
+                if x_datatype == PointField_.FLOAT64:  # double 类型
+                    x = np.frombuffer(data[i+x_offset:i+x_offset+8], dtype=np.float64)[0]
+                elif x_datatype == PointField_.FLOAT32:  # 兼容 float 类型
+                    x = np.frombuffer(data[i+x_offset:i+x_offset+4], dtype=np.float32)[0]
+                else:
+                    raise ValueError(f"不支持的x坐标数据类型: {x_datatype}")
+    
+                if y_datatype == PointField_.FLOAT64:
+                    y = np.frombuffer(data[i+y_offset:i+y_offset+8], dtype=np.float64)[0]
+                elif y_datatype == PointField_.FLOAT32:
+                    y = np.frombuffer(data[i+y_offset:i+y_offset+4], dtype=np.float32)[0]
+                else:
+                    raise ValueError(f"不支持的y坐标数据类型: {y_datatype}")
+    
+                if z_datatype == PointField_.FLOAT64:
+                    z = np.frombuffer(data[i+z_offset:i+z_offset+8], dtype=np.float64)[0]
+                elif z_datatype == PointField_.FLOAT32:
+                    z = np.frombuffer(data[i+z_offset:i+z_offset+4], dtype=np.float32)[0]
+                else:
+                    raise ValueError(f"不支持的z坐标数据类型: {z_datatype}")
+    
                 # 只考虑前方2米内、高度0.5米以下的有效点
                 if 0 < x < max_distance and abs(y) < lateral_range and z < 0.5:
                     front_points.append(x)
@@ -148,7 +177,6 @@ class LidarProcessor:
             print(f"点云处理错误: {str(e)}")
             self.obstacle_distance = None
             self.scan_complete = False
-
     def _lidar_worker(self):
         """LIDAR工作线程"""
         try:
