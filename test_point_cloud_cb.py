@@ -5,7 +5,7 @@ from typing import Any, Callable
 from unitree_sdk2py.core.channel import ChannelFactoryInitialize, ChannelSubscriber
 from unitree_sdk2py.idl.sensor_msgs.msg.dds_ import PointCloud2_, PointField_
 
-TOPIC_CLOUD = "rt/utlidar/cloud"
+TOPIC_CLOUD = "rt/utlidar/cloud_deskewed"
 
 def point_cloud_callback(cloud_data: PointCloud2_):
     """Callback function to handle received PointCloud2 data."""
