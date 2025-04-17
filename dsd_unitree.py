@@ -26,9 +26,7 @@ import signal
 
 from flask import Flask, render_template, request, jsonify, send_from_directory
 from flask_socketio import SocketIO
-import threading
-import os
-import time
+
 
 # LIDAR topic
 TOPIC_CLOUD = "rt/utlidar/cloud_deskewed"
@@ -532,7 +530,7 @@ class VoiceControl:
             print("语音设备初始化 成功")
         except Exception as e:
             self.cleanup_resources()
-        raise RuntimeError(f"语音设备初始化失败: {str(e)}")
+            raise RuntimeError(f"语音设备初始化失败: {str(e)}")
 
     def audio_callback(self, in_data, frame_count, time_info, status):
         """音频回调"""
