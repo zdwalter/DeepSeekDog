@@ -94,17 +94,21 @@ class LidarProcessor:
     # ---------- 点云处理 ----------
     def _process_point_cloud(self, cloud_data: PointCloud2_):
         try:
-            # 1. 数据完整性检查
+            # 1. Data validation
             if not cloud_data.fields or len(cloud_data.data) == 0:
-                raise ValueError("空点云数据")
-
-            # 2. 构建 ASCII 网格
+                raise ValueError("Empty point cloud data")
+    
+            # 2. Create ASCII grid
             grid_cols, grid_rows = 60, 20
             grid = [["·" for _ in range(grid_cols)] for _ in range(grid_rows)]
-
-            # 3. 字段解析
+    
+            # 3. Convert sequence[uint8] to bytes
+            cloud_bytes = bytes(cloud_data.data)  # Convert list of uint8 to bytes
+    
+            # 4. Parse field configurations
             field_config = {}
             byte_order = "big" if cloud_data.is_bigendian else "little"
+            
             for field in cloud_data.fields:
                 dtype = {
                     1: ("uint8", 1),
@@ -117,30 +121,30 @@ class LidarProcessor:
                     8: ("float64", 8),
                 }.get(field.datatype)
                 if not dtype:
-                    raise ValueError(f"不支持的字段类型: {field.datatype}")
-
+                    raise ValueError(f"Unsupported field type: {field.datatype}")
+    
                 field_config[field.name.lower()] = {
                     "offset": field.offset,
                     "dtype": dtype[0],
                     "size": dtype[1],
                     "count": field.count,
                 }
-
-            # 4. 坐标字段存在性
+    
+            # 5. Verify required fields exist
             for axis in ["x", "y", "z"]:
                 if axis not in field_config:
-                    raise ValueError(f"缺失坐标字段: {axis}")
-
-            # 5. 遍历点
+                    raise ValueError(f"Missing coordinate field: {axis}")
+    
+            # 6. Process points
             valid_points = []
-            for i in range(0, len(cloud_data.data), cloud_data.point_step):
+            for i in range(0, len(cloud_bytes), cloud_data.point_step):
                 point = {}
                 for axis in ["x", "y", "z"]:
                     cfg = field_config[axis]
                     start = i + cfg["offset"]
                     end = start + cfg["size"]
-                    chunk = cloud_data.data[start:end]
-
+                    chunk = cloud_bytes[start:end]
+    
                     if "float" in cfg["dtype"]:
                         value = np.frombuffer(chunk, dtype=cfg["dtype"])[0]
                     else:
@@ -150,23 +154,21 @@ class LidarProcessor:
                             signed=cfg["dtype"].startswith("i"),
                         )
                     point[axis] = float(value)
-
-                # 前方 3m × 左右 2m × 高 0.5m
-                if (
-                    0 < point["x"] <= 3.0
-                    and abs(point["y"]) <= 2.0
-                    and 0.1 < point["z"] <= 0.5
-                ):
+    
+                # Filter points in front of the robot (3m × 2m × 0.5m)
+                if (0 < point["x"] <= 3.0 and 
+                    abs(point["y"]) <= 2.0 and 
+                    0.1 < point["z"] <= 0.5):
                     valid_points.append(point)
                     col = int((point["y"] + 2.0) * grid_cols / 4.0)
                     row = int(point["x"] * grid_rows / 3.0)
                     if 0 <= row < grid_rows and 0 <= col < grid_cols:
                         grid[row][col] = ("#", "*", ".")[min(2, int(point["x"]))]
-
-            # ---------- 新增：保存 3D 点云图 ----------
+    
+            # 7. Save 3D point cloud visualization
             self._save_point_cloud_image(valid_points)
-
-            # 6. 可视化输出（终端）
+    
+            # 8. Terminal visualization
             visual = [
                 "\n 前方障碍物分布 (0.1m< Z ≤0.5m)",
                 " Y(左右)",
@@ -189,13 +191,13 @@ class LidarProcessor:
                 .replace("*", "\033[93m*\033[0m")
                 .replace(".", "\033[92m.\033[0m")
             )
-
-            # 7. 状态更新
+    
+            # 9. Update state
             self.obstacle_distance = (
-                min(p["x"] for p in valid_points) if valid_points else None
+                min(p['x'] for p in valid_points) if valid_points else None
             )
             self.scan_complete = True
-
+    
         except Exception as exc:
             print(f"点云处理异常: {type(exc).__name__}: {exc}")
             self.obstacle_distance = None
