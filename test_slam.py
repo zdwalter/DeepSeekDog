@@ -237,10 +237,10 @@ class SLAMMapper:
                 # 简单探索策略: 前进+随机转向
                 sport_client.Move(0.3, 0, 0)  # 前进
 
-                if self.obstacle_distance < 0.5:  # 检测到近距离障碍
-                    sport_client.Move(-0.2, 0, 0)  # 后退
-                    time.sleep(1)
-                    sport_client.Move(0, 0, 0.5)  # 转向
+                #if self.obstacle_distance < 0.5:  # 检测到近距离障碍
+                #    sport_client.Move(-0.2, 0, 0)  # 后退
+                #    time.sleep(1)
+                #    sport_client.Move(0, 0, 0.5)  # 转向
     
                 # 每隔几秒随机转向
                 if time.time() - last_turn_time > 5.0:
