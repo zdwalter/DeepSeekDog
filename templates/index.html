@@ -66,18 +66,6 @@
             margin-right: auto;
             border-bottom-left-radius: 5px;
         }
-        .mic-btn {
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-        .mic-btn.active {
-            color: #dc3545;
-            transform: scale(1.1);
-        }
-        #voiceInputStatus {
-            font-size: 0.8rem;
-            color: #6c757d;
-        }
         .status-badge {
             font-size: 0.75rem;
             padding: 0.25rem 0.5rem;
@@ -95,10 +83,41 @@
         }
         #currentPhoto {
             position: relative;
-            min-height: 300px; /* 保持固定高度防止布局抖动 */
+            min-height: 300px;
         }
-        #latestPhoto {
-            transition: opacity 0.5s ease-in-out;
+        
+        /* SLAM Map Styles */
+        #slamMapContainer {
+            margin-top: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 10px;
+            background-color: #f8f9fa;
+        }
+        #slamMapImage {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin: 0 auto;
+        }
+        .slam-controls {
+            margin-top: 10px;
+            display: flex;
+            gap: 5px;
+            flex-wrap: wrap;
+        }
+        .map-list {
+            max-height: 200px;
+            overflow-y: auto;
+            margin-top: 10px;
+        }
+        .map-item {
+            padding: 5px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+        }
+        .map-item:hover {
+            background-color: #f0f0f0;
         }
     </style>
 </head>
@@ -134,16 +153,35 @@
                     </div>
                 </div>
                 
+                <!-- SLAM Map Panel -->
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <h5>SLAM地图</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="slamMapContainer">
+                            <img id="slamMapImage" src="" alt="SLAM地图">
+                        </div>
+                        <div class="slam-controls">
+                            <button id="startMappingBtn" class="btn btn-success btn-sm">开始建图</button>
+                            <button id="stopMappingBtn" class="btn btn-danger btn-sm">停止建图</button>
+                            <button id="saveMapBtn" class="btn btn-primary btn-sm">保存地图</button>
+                            <button id="loadMapBtn" class="btn btn-info btn-sm">加载地图</button>
+                            <button id="refreshMapBtn" class="btn btn-secondary btn-sm">刷新地图</button>
+                        </div>
+                        <div id="mapList" class="map-list"></div>
+                    </div>
+                </div>
+                
                 <!-- Interaction Panel -->
                 <div class="card interaction-panel">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <h5 class="mb-0">交互控制</h5>
-                        <span class="badge bg-success status-badge" id="voiceStatus">语音就绪</span>
+                    <div class="card-header">
+                        <h5>指令控制</h5>
                     </div>
                     <div class="card-body">
                         <div class="chat-container" id="chatBox">
                             <div class="message bot-message">
-                                <i class="bi bi-robot"></i> 系统已就绪，您可以通过文字或语音与我交互
+                                <i class="bi bi-robot"></i> 系统已就绪，请输入指令
                             </div>
                         </div>
                         
@@ -152,19 +190,6 @@
                             <button class="btn btn-primary" id="sendTextBtn">
                                 <i class="bi bi-send"></i> 发送
                             </button>
-                        </div>
-                        
-                        <div class="d-flex justify-content-between align-items-center mt-3">
-                            <div>
-                                <button class="btn btn-outline-secondary mic-btn" id="micBtn">
-                                    <i class="bi bi-mic"></i> 语音输入
-                                </button>
-                                <span id="voiceInputStatus">准备就绪</span>
-                            </div>
-                            <div class="form-check form-switch">
-                                <input class="form-check-input" type="checkbox" id="autoListenCheck">
-                                <label class="form-check-label" for="autoListenCheck">自动监听</label>
-                            </div>
                         </div>
                     </div>
                 </div>
@@ -229,8 +254,8 @@
                                 <span id="autoPhotoStatus">关闭</span>
                             </li>
                             <li class="list-group-item d-flex justify-content-between">
-                                <span><i class="bi bi-mic"></i> 语音识别:</span>
-                                <span id="asrStatus">离线</span>
+                                <span><i class="bi bi-map"></i> SLAM状态:</span>
+                                <span id="slamStatus">待机</span>
                             </li>
                         </ul>
                     </div>
@@ -246,109 +271,7 @@
         const socket = io();
         let autoPhotoInterval = null;
         let lastPhotoTime = 0;
-        let recognition;
-        let isListening = false;
-        
-        // 初始化语音识别
-        function initSpeechRecognition() {
-            try {
-                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-                if (!SpeechRecognition) {
-                    throw new Error('浏览器不支持语音识别');
-                }
-                
-                recognition = new SpeechRecognition();
-                recognition.continuous = true;
-                recognition.interimResults = true;
-                recognition.lang = 'zh-CN';
-                
-                recognition.onstart = function() {
-                    console.log('语音识别开始');
-                    document.getElementById('voiceInputStatus').textContent = '正在监听...';
-                    document.getElementById('micBtn').classList.add('active');
-                    document.getElementById('asrStatus').textContent = '在线';
-                    document.getElementById('voiceStatus').className = 'badge bg-success status-badge';
-                    document.getElementById('voiceStatus').textContent = '识别中';
-                    isListening = true;
-                };
-                
-                recognition.onend = function() {
-                    console.log('语音识别结束');
-                    document.getElementById('voiceInputStatus').textContent = '准备就绪';
-                    document.getElementById('micBtn').classList.remove('active');
-                    document.getElementById('voiceStatus').className = 'badge bg-secondary status-badge';
-                    document.getElementById('voiceStatus').textContent = '待命';
-                    isListening = false;
-                    
-                    // 如果开启了自动监听，重新启动
-                    if (document.getElementById('autoListenCheck').checked) {
-                        setTimeout(startListening, 500);
-                    }
-                };
-                
-                recognition.onresult = function(event) {
-                    let interimTranscript = '';
-                    let finalTranscript = '';
-                    
-                    for (let i = event.resultIndex; i < event.results.length; i++) {
-                        const transcript = event.results[i][0].transcript;
-                        if (event.results[i].isFinal) {
-                            finalTranscript += transcript;
-                        } else {
-                            interimTranscript += transcript;
-                        }
-                    }
-                    
-                    // 显示临时识别结果
-                    if (interimTranscript) {
-                        document.getElementById('textInput').value = interimTranscript;
-                    }
-                    
-                    // 发送最终识别结果
-                    if (finalTranscript) {
-                        document.getElementById('textInput').value = finalTranscript;
-                        sendUserMessage(finalTranscript);
-                    }
-                };
-                
-                recognition.onerror = function(event) {
-                    console.error('语音识别错误:', event.error);
-                    addBotMessage('语音识别错误: ' + event.error);
-                    document.getElementById('asrStatus').textContent = '错误';
-                    document.getElementById('voiceStatus').className = 'badge bg-danger status-badge';
-                    document.getElementById('voiceStatus').textContent = '识别错误';
-                };
-                
-                console.log('语音识别初始化成功');
-                
-            } catch (e) {
-                console.error('语音识别初始化失败:', e);
-                document.getElementById('micBtn').disabled = true;
-                document.getElementById('asrStatus').textContent = '不支持';
-                document.getElementById('voiceStatus').className = 'badge bg-danger status-badge';
-                document.getElementById('voiceStatus').textContent = '不可用';
-                addBotMessage('错误: 您的浏览器不支持语音识别功能');
-            }
-        }
-        
-        // 开始监听语音
-        function startListening() {
-            if (recognition && !isListening) {
-                try {
-                    recognition.start();
-                } catch (e) {
-                    console.error('语音识别启动失败:', e);
-                    addBotMessage('语音识别启动失败，请刷新页面重试');
-                }
-            }
-        }
-        
-        // 停止监听语音
-        function stopListening() {
-            if (recognition && isListening) {
-                recognition.stop();
-            }
-        }
+        let mapRefreshInterval = null;
         
         // 添加用户消息到聊天框
         function addUserMessage(message) {
@@ -384,58 +307,37 @@
         // 加载最新照片
         function loadLatestPhoto() {
             const timestamp = new Date().getTime();
-            const container = document.getElementById('currentPhoto');
-            const oldImg = document.getElementById('latestPhoto');
+            const img = document.getElementById('latestPhoto');
+            img.src = `/photo/photo.jpg?t=${timestamp}`;
             
-            // 创建新图片元素
-            const newImg = new Image();
-            newImg.id = 'latestPhoto';
-            newImg.className = 'img-fluid';
-            newImg.style.maxHeight = '300px';
-            newImg.style.position = 'absolute';
-            newImg.style.opacity = '0';
-            newImg.style.transition = 'opacity 0.5s ease-in-out';
-        
-            // 预加载新图片
-            newImg.onload = function() {
-                // 淡入新图片
-                newImg.style.opacity = '1';
-                
-                // 移除旧图片（延迟确保过渡完成）
-                setTimeout(() => {
-                    if (oldImg.parentNode === container) {
-                        container.removeChild(oldImg);
-                    }
-                }, 500);
-        
+            img.onload = function() {
                 lastPhotoTime = timestamp;
                 updatePhotoTime();
                 document.getElementById('cameraStatus').className = 'badge bg-success status-badge';
                 document.getElementById('cameraStatus').textContent = '摄像头在线';
             };
-        
-            newImg.onerror = function() {
-                container.removeChild(newImg);
+            
+            img.onerror = function() {
                 console.error('图片加载失败');
                 document.getElementById('cameraStatus').className = 'badge bg-danger status-badge';
                 document.getElementById('cameraStatus').textContent = '摄像头离线';
             };
+        }
         
-            // 设置新图片源
-            newImg.src = `/photo/photo.jpg?t=${timestamp}`;
+        // 加载SLAM地图
+        function loadSLAMMap() {
+            const timestamp = new Date().getTime();
+            const img = document.getElementById('slamMapImage');
+            img.src = `/photo/slam_map.jpg?t=${timestamp}`;
             
-            // 设置容器定位样式
-            container.style.position = 'relative';
+            img.onload = function() {
+                document.getElementById('slamStatus').textContent = '地图已加载';
+            };
             
-            // 添加新图片到容器
-            container.appendChild(newImg);
-        
-            // 设置旧图片淡出
-            if (oldImg) {
-                oldImg.style.position = 'absolute';
-                oldImg.style.opacity = '0';
-                oldImg.style.transition = 'opacity 0.5s ease-in-out';
-            }
+            img.onerror = function() {
+                console.error('SLAM地图加载失败');
+                document.getElementById('slamStatus').textContent = '地图不可用';
+            };
         }
         
         // 更新照片时间显示
@@ -461,6 +363,35 @@
                 });
             
             setTimeout(updateStatus, 5000);
+        }
+        
+        // 加载地图列表
+        function loadMapList() {
+            fetch('/maps')
+                .then(response => response.json())
+                .then(maps => {
+                    const mapList = document.getElementById('mapList');
+                    mapList.innerHTML = '';
+                    
+                    if (maps.length === 0) {
+                        mapList.innerHTML = '<div class="text-muted text-center">没有找到地图文件</div>';
+                        return;
+                    }
+                    
+                    maps.forEach(map => {
+                        const item = document.createElement('div');
+                        item.className = 'map-item';
+                        item.textContent = map.filename;
+                        item.onclick = function() {
+                            socket.emit('command', { command: `加载地图 ${map.filename}` });
+                            addUserMessage(`加载地图: ${map.filename}`);
+                        };
+                        mapList.appendChild(item);
+                    });
+                })
+                .catch(error => {
+                    console.error('加载地图列表失败:', error);
+                });
         }
         
         // 切换自动拍照
@@ -506,87 +437,116 @@
                     sendUserMessage(message);
                 }
             });
+
+            // 拍照按钮
+            document.getElementById('takePhotoBtn').addEventListener('click', function() {
+                socket.emit('take_photo');
+                addUserMessage("执行: 拍照");
+            });
+
+            // 运动控制按钮
+            document.querySelectorAll('.command-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const command = this.getAttribute('data-cmd');
+                    socket.emit('command', { command: command });
+                    addUserMessage(`执行: ${command}`);
+                });
+            });
             
-            // 语音输入按钮
-            document.getElementById('micBtn').addEventListener('click', function() {
-                if (isListening) {
-                    stopListening();
-                } else {
-                    startListening();
-                }
+            // SLAM控制按钮
+            document.getElementById('startMappingBtn').addEventListener('click', function() {
+                socket.emit('command', { command: '开始建图' });
+                addUserMessage('执行: 开始建图');
+                document.getElementById('slamStatus').textContent = '建图中...';
+            });
+            
+            document.getElementById('stopMappingBtn').addEventListener('click', function() {
+                socket.emit('command', { command: '停止建图' });
+                addUserMessage('执行: 停止建图');
+                document.getElementById('slamStatus').textContent = '已停止';
+            });
+            
+            document.getElementById('saveMapBtn').addEventListener('click', function() {
+                socket.emit('command', { command: '保存地图' });
+                addUserMessage('执行: 保存地图');
+                document.getElementById('slamStatus').textContent = '保存中...';
+                
+                // 保存后刷新地图列表
+                setTimeout(loadMapList, 1000);
+            });
+            
+            document.getElementById('loadMapBtn').addEventListener('click', function() {
+                loadMapList();
+                addUserMessage('查看地图列表');
+            });
+            
+            document.getElementById('refreshMapBtn').addEventListener('click', function() {
+                socket.emit('command', { command: '查看地图' });
+                addUserMessage('执行: 刷新地图');
+                loadSLAMMap();
+            });
+            
+            // 自动拍照切换
+            document.getElementById('toggleAutoPhotoBtn').addEventListener('click', toggleAutoPhoto);
+        }
+
+        // Socket.IO 事件监听
+        function initSocketListeners() {
+            // 接收TTS消息
+            socket.on('tts_message', function(data) {
+                addBotMessage(data.message);
             });
 
-// 自动监听复选框
-        document.getElementById('autoListenCheck').addEventListener('change', function() {
-            if (this.checked) {
-                startListening();
-            } else {
-                stopListening();
-            }
-        });
-
-        // 拍照按钮
-        document.getElementById('takePhotoBtn').addEventListener('click', function() {
-            socket.emit('take_photo');
-            addUserMessage("执行: 拍照");
-        });
-
-        // 运动控制按钮
-        document.querySelectorAll('.command-btn').forEach(btn => {
-            btn.addEventListener('click', function() {
-                const command = this.getAttribute('data-cmd');
-                socket.emit('command', { command: command });
-                addUserMessage(`执行: ${command}`);
-            });
-        });
-    }
-
-    // Socket.IO 事件监听
-    function initSocketListeners() {
-        // 接收TTS消息
-        socket.on('tts_message', function(data) {
-            addBotMessage(data.message);
-        });
-
-        // 接收新照片通知
-        socket.on('new_photo', function(data) {
-            loadLatestPhoto();
-        });
-
-        // 接收系统状态更新
-        socket.on('status_update', function(data) {
-            document.getElementById('runningStatus').textContent = data.running ? '运行中' : '已停止';
-            document.getElementById('networkStatus').textContent = data.network ? '在线' : '离线';
-            document.getElementById('workMode').textContent = data.mode === 'debug' ? '调试模式' : '正常模式';
-        });
-
-        // 连接成功
-        socket.on('connect', function() {
-            console.log('已连接到服务器');
-            addBotMessage('系统连接正常');
-        });
-
-        // 连接断开
-        socket.on('disconnect', function() {
-            console.log('与服务器断开连接');
-            addBotMessage('警告: 与服务器失去连接');
-        });
-    }
-
-    // 初始化
-    document.addEventListener('DOMContentLoaded', function() {
-        initSpeechRecognition();
-        initEventListeners();
-        initSocketListeners();
-        updateStatus();
-        loadLatestPhoto();
-
-        // 每10秒检查一次照片更新
-        setInterval(() => {
-            if (!autoPhotoInterval && Date.now() - lastPhotoTime > 15000) {
+            // 接收新照片通知
+            socket.on('new_photo', function(data) {
                 loadLatestPhoto();
-            }
-        }, 10000);
-    });
-</script>
-</body> </html> 
+            });
+
+            // 接收SLAM地图更新
+            socket.on('slam_map_update', function(data) {
+                loadSLAMMap();
+            });
+
+            // 接收系统状态更新
+            socket.on('status_update', function(data) {
+                document.getElementById('runningStatus').textContent = data.running ? '运行中' : '已停止';
+                document.getElementById('networkStatus').textContent = data.network ? '在线' : '离线';
+                document.getElementById('workMode').textContent = data.mode === 'debug' ? '调试模式' : '正常模式';
+                document.getElementById('slamStatus').textContent = data.lidar === 'active' ? '建图中' : '待机';
+            });
+
+            // 连接成功
+            socket.on('connect', function() {
+                console.log('已连接到服务器');
+                addBotMessage('系统连接正常');
+            });
+
+            // 连接断开
+            socket.on('disconnect', function() {
+                console.log('与服务器断开连接');
+                addBotMessage('警告: 与服务器失去连接');
+            });
+        }
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            initEventListeners();
+            initSocketListeners();
+            updateStatus();
+            loadLatestPhoto();
+            loadSLAMMap();
+            loadMapList();
+
+            // 启动地图自动刷新
+            mapRefreshInterval = setInterval(loadSLAMMap, 5000);
+
+            // 每10秒检查一次照片更新
+            setInterval(() => {
+                if (!autoPhotoInterval && Date.now() - lastPhotoTime > 15000) {
+                    loadLatestPhoto();
+                }
+            }, 10000);
+        });
+    </script>
+</body>
+</html>
