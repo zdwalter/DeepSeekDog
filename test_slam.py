@@ -15,6 +15,8 @@ import subprocess
 import sys
 import threading
 import time
+from collections import deque
+from datetime import datetime
 from pathlib import Path
 
 import cv2
@@ -33,6 +35,11 @@ matplotlib.use("Agg")          # 无显示环境也能保存图片
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 (触发 3D 投影注册)
 
+# ---------- 新增：SLAM 相关库 ----------
+from skimage.transform import rotate
+from scipy.ndimage import gaussian_filter
+import pickle
+
 # ---------- Unitree‑SDK ----------
 from unitree_sdk2py.core.channel import ChannelFactoryInitialize, ChannelSubscriber
 from unitree_sdk2py.idl.sensor_msgs.msg.dds_ import PointCloud2_
@@ -46,25 +53,230 @@ from unitree_sdk2py.go2.obstacles_avoid.obstacles_avoid_client import (
 #  常量
 # ============================================================
 TOPIC_CLOUD = "rt/utlidar/cloud_deskewed"
+MAPS_DIR = "static/maps"  # 地图保存目录
+MAP_RESOLUTION = 0.05  # 地图分辨率 (米/像素)
+MAP_SIZE = 200  # 地图尺寸 (像素)
+MAX_EXPLORE_TIME = 300  # 最大探索时间 (秒)
 
 # ============================================================
-#  Lidar 处理类
+#  SLAM 建图类
+# ============================================================
+class SLAMMapper:
+    """SLAM 建图和导航类"""
+    
+    def __init__(self):
+        self.map = np.zeros((MAP_SIZE, MAP_SIZE), dtype=np.float32)  # 占据网格地图
+        self.origin = np.array([MAP_SIZE//2, MAP_SIZE//2])  # 地图原点 (中心)
+        self.robot_pose = np.array([0.0, 0.0, 0.0])  # [x, y, theta] (米, 米, 弧度)
+        self.exploring = False
+        self.explore_thread = None
+        self.map_lock = threading.Lock()
+        self.path_history = deque(maxlen=1000)  # 路径历史记录
+        
+        # 创建地图目录
+        os.makedirs(MAPS_DIR, exist_ok=True)
+        
+    def reset_map(self):
+        """重置地图"""
+        with self.map_lock:
+            self.map.fill(0)
+            self.robot_pose = np.array([0.0, 0.0, 0.0])
+            self.path_history.clear()
+    
+    def world_to_map(self, world_coords):
+        """世界坐标转地图坐标"""
+        map_coords = (world_coords[:2] / MAP_RESOLUTION + self.origin).astype(int)
+        return np.clip(map_coords, 0, MAP_SIZE-1)
+    
+    def map_to_world(self, map_coords):
+        """地图坐标转世界坐标"""
+        return (map_coords - self.origin) * MAP_RESOLUTION
+    
+    def update_map(self, point_cloud):
+        """用点云数据更新地图"""
+        if point_cloud is None:
+            return
+            
+        try:
+            # 获取有效点
+            valid_points = []
+            for p in point_cloud:
+                if abs(p['x']) < 5.0 and abs(p['y']) < 5.0:  # 限制范围
+                    valid_points.append([p['x'], p['y']])
+            
+            if not valid_points:
+                return
+                
+            # 转换到地图坐标系
+            points = np.array(valid_points)
+            map_points = self.world_to_map(points)
+            
+            # 更新占据网格
+            with self.map_lock:
+                # 清除旧的占据信息
+                self.map.fill(0)
+                
+                # 标记障碍物
+                for x, y in map_points:
+                    self.map[y, x] = 1.0  # 占据
+                
+                # 标记机器人当前位置
+                robot_map_pos = self.world_to_map(self.robot_pose[:2])
+                self.map[robot_map_pos[1], robot_map_pos[0]] = 0.5  # 机器人位置
+                
+                # 高斯平滑
+                self.map = gaussian_filter(self.map, sigma=1.0)
+                
+        except Exception as e:
+            print(f"地图更新错误: {e}")
+    
+    def save_map(self, filename=None):
+        """保存当前地图到文件"""
+        if filename is None:
+            filename = f"map_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pkl"
+            
+        filepath = os.path.join(MAPS_DIR, filename)
+        
+        with self.map_lock:
+            map_data = {
+                'map': self.map.copy(),
+                'resolution': MAP_RESOLUTION,
+                'origin': self.origin,
+                'robot_pose': self.robot_pose,
+                'path_history': list(self.path_history)
+            }
+            
+            with open(filepath, 'wb') as f:
+                pickle.dump(map_data, f)
+                
+        print(f"地图已保存到 {filepath}")
+        return filepath
+    
+    def load_map(self, filename):
+        """从文件加载地图"""
+        filepath = os.path.join(MAPS_DIR, filename)
+        
+        try:
+            with open(filepath, 'rb') as f:
+                map_data = pickle.load(f)
+                
+            with self.map_lock:
+                self.map = map_data['map']
+                self.origin = map_data['origin']
+                self.robot_pose = map_data['robot_pose']
+                self.path_history = deque(map_data['path_history'], maxlen=1000)
+                
+            print(f"已加载地图 {filename}")
+            return True
+            
+        except Exception as e:
+            print(f"加载地图失败: {e}")
+            return False
+    
+    def get_map_image(self):
+        """获取当前地图的可视化图像"""
+        with self.map_lock:
+            # 创建彩色地图
+            cmap = plt.cm.get_cmap('viridis')
+            colored_map = cmap(self.map)
+            
+            # 添加路径历史
+            if len(self.path_history) > 1:
+                path = np.array(self.path_history)
+                path_map = self.world_to_map(path[:, :2])
+                for x, y in path_map:
+                    colored_map[y, x] = [1.0, 0.0, 0.0, 1.0]  # 红色路径
+                    
+            # 添加机器人当前位置
+            robot_pos = self.world_to_map(self.robot_pose[:2])
+            cv2.circle(colored_map, (robot_pos[0], robot_pos[1]), 3, (0, 0, 1.0), -1)
+            
+            # 旋转地图使机器人始终朝上
+            angle = np.degrees(self.robot_pose[2])
+            rotated_map = rotate(colored_map, angle, center=(robot_pos[0], robot_pos[1]), order=0)
+            
+            return (rotated_map * 255).astype(np.uint8)
+    
+    def update_pose(self, dx, dy, dtheta):
+        """更新机器人位姿"""
+        with self.map_lock:
+            # 更新位置
+            self.robot_pose[0] += dx
+            self.robot_pose[1] += dy
+            self.robot_pose[2] = (self.robot_pose[2] + dtheta) % (2 * np.pi)
+            
+            # 记录路径
+            self.path_history.append(self.robot_pose.copy())
+    
+    def explore_environment(self, sport_client, duration=MAX_EXPLORE_TIME):
+        """自动探索环境"""
+        if self.exploring:
+            return False
+            
+        self.exploring = True
+        self.explore_thread = threading.Thread(
+            target=self._explore_worker, 
+            args=(sport_client, duration),
+            daemon=True
+        )
+        self.explore_thread.start()
+        return True
+    
+    def _explore_worker(self, sport_client, duration):
+        """探索工作线程"""
+        start_time = time.time()
+        last_turn_time = time.time()
+        turn_direction = 1  # 1 for right, -1 for left
+        
+        try:
+            while self.exploring and (time.time() - start_time) < duration:
+                # 简单探索策略: 前进+随机转向
+                sport_client.Move(0.3, 0, 0)  # 前进
+                
+                # 每隔几秒随机转向
+                if time.time() - last_turn_time > 5.0:
+                    turn_direction *= -1
+                    sport_client.Move(0, 0, 0.5 * turn_direction)
+                    last_turn_time = time.time()
+                    time.sleep(1.0)
+                
+                # 更新位姿 (简化版，实际应该用里程计)
+                self.update_pose(0.1, 0, 0.01 * turn_direction)
+                
+                time.sleep(0.1)
+                
+        finally:
+            sport_client.StopMove()
+            self.exploring = False
+    
+    def stop_exploration(self):
+        """停止探索"""
+        self.exploring = False
+        if self.explore_thread:
+            self.explore_thread.join(timeout=1.0)
+
+
+
+# ============================================================
+#  Lidar 处理类 (更新版)
 # ============================================================
 class LidarProcessor:
     """LIDAR 数据处理"""
-
-    def __init__(self):
+    
+    def __init__(self, slam_mapper=None):
         self.latest_cloud_data = None
         self.lidar_running = False
         self.lidar_thread = None
         self.cloud_subscriber = None
         self.obstacle_distance = None
         self.scan_complete = False
-
-    # ---------- 启动 / 停止 ----------
+        self.slam_mapper = slam_mapper  # SLAM 建图器
+        self.point_cloud_cache = []
+        
     def start_lidar(self):
         if self.lidar_running:
             return
+                    
         self.cloud_subscriber = ChannelSubscriber(TOPIC_CLOUD, PointCloud2_)
         self.cloud_subscriber.Init(handler=self.point_cloud_callback)
 
@@ -74,21 +286,17 @@ class LidarProcessor:
         )
         self.lidar_thread.start()
         print("LIDAR 数据接收已启动")
-
-    def stop_lidar(self):
-        if not self.lidar_running:
-            return
-        self.lidar_running = False
-        if self.cloud_subscriber:
-            self.cloud_subscriber.Close()
-        if self.lidar_thread:
-            self.lidar_thread.join(timeout=1)
-        print("LIDAR 数据接收已停止")
-
-    # ---------- 订阅回调 ----------
+        
     def point_cloud_callback(self, cloud_data: PointCloud2_):
         if cloud_data is not None:
             self.latest_cloud_data = cloud_data
+            point_cloud = self._process_point_cloud(cloud_data)
+            
+            # 更新SLAM地图
+            if self.slam_mapper and point_cloud:
+                self.slam_mapper.update_map(point_cloud)
+                
+            # 障碍物检测
             self._process_point_cloud(cloud_data)
 
     # ---------- 点云处理 ----------
@@ -285,7 +493,7 @@ class LidarProcessor:
 
 
 # ============================================================
-#  Web 接口
+#  Web 接口 (更新版)
 # ============================================================
 class WebInterface:
     def __init__(self, voice_controller, host="0.0.0.0", port=5000):
@@ -296,6 +504,11 @@ class WebInterface:
         self.voice_controller = voice_controller
         self.host = host
         self.port = port
+        
+        # 新增地图路由
+        self.app.add_url_rule("/maps", "get_maps", self.get_maps, methods=["GET"])
+        self.app.add_url_rule("/map/<filename>", "get_map", self.get_map)
+        self.app.add_url_rule("/slam_map", "get_slam_map", self.get_slam_map)
 
         self.auto_photo_enabled = True
         self.photo_interval = 3000  # ms
@@ -405,6 +618,38 @@ class WebInterface:
             }
         )
 
+    def get_maps(self):
+        """获取所有保存的地图列表"""
+        maps = []
+        if os.path.exists(MAPS_DIR):
+            for f in os.listdir(MAPS_DIR):
+                if f.endswith('.pkl'):
+                    maps.append({
+                        "filename": f,
+                        "timestamp": os.path.getmtime(os.path.join(MAPS_DIR, f)),
+                        "url": f"/map/{f}"
+                    })
+        return jsonify(sorted(maps, key=lambda x: x["timestamp"], reverse=True))
+    
+    def get_map(self, filename):
+        """获取地图文件"""
+        return send_from_directory(MAPS_DIR, filename)
+    
+    def get_slam_map(self):
+        """获取当前SLAM地图图像"""
+        if hasattr(self.voice_controller, "slam_mapper"):
+            map_image = self.voice_controller.slam_mapper.get_map_image()
+            if map_image is not None:
+                # 保存为临时图片
+                map_path = "static/photos/slam_map.jpg"
+                cv2.imwrite(map_path, cv2.cvtColor(map_image, cv2.COLOR_RGBA2BGR))
+                
+                return jsonify({
+                    "url": "/photo/slam_map.jpg",
+                    "timestamp": time.time()
+                })
+        return jsonify({"error": "No map available"}), 404
+        
     # ---------- run ----------
     def run_server(self):
         print(f"Starting web server on {self.host}:{self.port}")
@@ -589,6 +834,27 @@ class VoiceControl:
             r"front obstacle$": 12,
         }
 
+        # 新增SLAM建图器
+        self.slam_mapper = SLAMMapper()
+        
+        # 更新Lidar处理器
+        self.lidar_processor = LidarProcessor(self.slam_mapper)
+        self.lidar_processor.start_lidar()
+        
+        # 新增命令映射
+        self.command_map.update({
+            r"开始建图$": 20,
+            r"停止建图$": 21,
+            r"保存地图$": 22,
+            r"加载地图$": 23,
+            r"查看地图$": 24,
+            r"start mapping$": 20,
+            r"stop mapping$": 21,
+            r"save map$": 22,
+            r"load map$": 23,
+            r"show map$": 24,
+        })
+        
         # ---------- 运动 ----------
         self.sport_client = SportClient()
         self.sport_client.SetTimeout(10.0)
@@ -835,7 +1101,37 @@ class VoiceControl:
 
             elif action_id == 8:  # 分析图片
                 self.handle_image_analysis()
-
+            # 新增SLAM相关动作
+            elif action_id == 20:  # 开始建图
+                if self.slam_mapper.explore_environment(self.sport_client):
+                    self.tts_queue.put("开始建图，机器人将自动探索环境")
+                else:
+                    self.tts_queue.put("建图已在运行中")
+                    
+            elif action_id == 21:  # 停止建图
+                self.slam_mapper.stop_exploration()
+                self.tts_queue.put("已停止建图")
+                
+            elif action_id == 22:  # 保存地图
+                map_path = self.slam_mapper.save_map()
+                self.tts_queue.put(f"地图已保存到 {os.path.basename(map_path)}")
+                
+            elif action_id == 23:  # 加载地图
+                # 实际应用中应该让用户选择地图文件
+                maps = [f for f in os.listdir(MAPS_DIR) if f.endswith('.pkl')]
+                if maps:
+                    latest_map = max(maps, key=lambda f: os.path.getmtime(os.path.join(MAPS_DIR, f)))
+                    if self.slam_mapper.load_map(latest_map):
+                        self.tts_queue.put(f"已加载地图 {latest_map}")
+                    else:
+                        self.tts_queue.put("加载地图失败")
+                else:
+                    self.tts_queue.put("没有找到地图文件")
+                    
+            elif action_id == 24:  # 查看地图
+                self.tts_queue.put("正在显示当前地图")
+                # 前端将通过WebSocket请求地图图像
+        
             if not self.debug_mode and action_id not in (7, 8, 10, 11, 12):
                 self.tts_queue.put("指令已执行")
 
@@ -880,7 +1176,10 @@ class VoiceControl:
     def cleanup_resources(self):
         print("正在清理资源...")
         self.running = False
-
+        
+        # 停止SLAM建图
+        if hasattr(self, "slam_mapper"):
+            self.slam_mapper.stop_exploration()
         # 音频
         if hasattr(self, "audio_stream") and self.audio_stream.is_active():
             self.audio_stream.stop_stream()
