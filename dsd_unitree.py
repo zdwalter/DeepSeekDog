@@ -242,7 +242,7 @@ class LidarProcessor:
                 handles=legend_elements, 
                 loc='upper right',
                 title="Distance Range",
-                bbox_to_anchor=(1.25, 1.0)
+                bbox_to_anchor=(1.25, 1.0))
             
             # 调整视角和布局
             ax.view_init(elev=25, azim=45)
