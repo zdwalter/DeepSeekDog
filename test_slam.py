@@ -149,6 +149,10 @@ class SLAMMapper:
             with open(filepath, 'wb') as f:
                 pickle.dump(map_data, f)
                 
+            map_img = self.get_map_image()
+            img_path = f"map.jpg"
+            img_path = os.path.join(MAPS_DIR, img_path)
+            cv2.imwrite(img_path, map_img)                
         print(f"地图已保存到 {filepath}")
         return filepath
     
@@ -232,7 +236,12 @@ class SLAMMapper:
             while self.exploring and (time.time() - start_time) < duration:
                 # 简单探索策略: 前进+随机转向
                 sport_client.Move(0.3, 0, 0)  # 前进
-                
+
+                if self.obstacle_distance < 0.5:  # 检测到近距离障碍
+                    sport_client.Move(-0.2, 0, 0)  # 后退
+                    time.sleep(1)
+                    sport_client.Move(0, 0, 0.5)  # 转向
+    
                 # 每隔几秒随机转向
                 if time.time() - last_turn_time > 5.0:
                     turn_direction *= -1
@@ -450,7 +459,7 @@ class LidarProcessor:
                 handles=legend_elements, 
                 loc='upper right',
                 title="Distance Range",
-                bbox_to_anchor=(1.25, 1.0)
+                bbox_to_anchor=(1.25, 1.0))
             
             # 调整视角和布局
             ax.view_init(elev=25, azim=45)
@@ -795,9 +804,7 @@ class VoiceControl:
         self.video_client.SetTimeout(3.0)
         self.video_client.Init()
 
-        # ---------- Lidar ----------
-        self.lidar_processor = LidarProcessor()
-        self.lidar_processor.start_lidar()
+
 
         # ---------- 命令映射 ----------
         self.command_map = {
