@@ -155,42 +155,11 @@ class LidarProcessor:
                         )
                     point[axis] = float(value)
     
-                # Filter points in front of the robot (3m × 2m × 0.5m)
-                if (0 < point["x"] <= 3.0 and 
-                    abs(point["y"]) <= 2.0 and 
-                    0.1 < point["z"] <= 0.5):
-                    valid_points.append(point)
-                    col = int((point["y"] + 2.0) * grid_cols / 4.0)
-                    row = int(point["x"] * grid_rows / 3.0)
-                    if 0 <= row < grid_rows and 0 <= col < grid_cols:
-                        grid[row][col] = ("#", "*", ".")[min(2, int(point["x"]))]
+                valid_points.append(point)
     
             # 7. Save 3D point cloud visualization
             self._save_point_cloud_image(valid_points)
     
-            # 8. Terminal visualization
-            visual = [
-                "\n 前方障碍物分布 (0.1m< Z ≤0.5m)",
-                " Y(左右)",
-                "   ↑",
-                "   |   " + "".join(grid[0]),
-                *[
-                    f"{3.0 - i * 0.15:>4.1f}m|{''.join(row)}"
-                    for i, row in enumerate(grid)
-                ],
-                "   +" + "-" * (grid_cols - 3) + "→ X(前方)",
-                (
-                    f" 最近障碍物: {min(p['x'] for p in valid_points):.2f}m"
-                    if valid_points
-                    else " 无有效障碍物"
-                ),
-            ]
-            print(
-                "\n".join(visual)
-                .replace("#", "\033[91m#\033[0m")
-                .replace("*", "\033[93m*\033[0m")
-                .replace(".", "\033[92m.\033[0m")
-            )
     
             # 9. Update state
             self.obstacle_distance = (
@@ -205,20 +174,82 @@ class LidarProcessor:
 
     # ---------- 新增：点云图保存 ----------
     def _save_point_cloud_image(self, points):
-        """将当前点云保存为 point_cloud.jpg（覆盖式）"""
+        """将当前点云保存为 point_cloud.jpg（覆盖式）
+        根据点与原点的距离显示不同颜色，按0.5米间隔：
+        - 0-0.5m: 红色
+        - 0.5-1.0m: 橙色
+        - 1.0-1.5m: 黄色
+        - 1.5-2.0m: 黄绿色
+        - 2.0-2.5m: 绿色
+        - 2.5-3.0m: 蓝绿色
+        - 3.0m+: 蓝色
+        """
         if not points:
             return
         try:
             arr = np.array([[p["x"], p["y"], p["z"]] for p in points])
-            fig = plt.figure(figsize=(6, 4))
+            
+            # 计算每个点到原点的距离
+            distances = np.sqrt(arr[:,0]**2 + arr[:,1]**2 + arr[:,2]**2)
+            
+            # 定义颜色映射 (每0.5米一个颜色)
+            color_map = [
+                (0.0, 0.5, [1.0, 0.0, 0.0]),    # 红色 (0-0.5m)
+                (0.5, 1.0, [1.0, 0.5, 0.0]),    # 橙色
+                (1.0, 1.5, [1.0, 1.0, 0.0]),    # 黄色
+                (1.5, 2.0, [0.7, 1.0, 0.0]),    # 黄绿色
+                (2.0, 2.5, [0.0, 1.0, 0.0]),   # 绿色
+                (2.5, 3.0, [0.0, 1.0, 0.7]),    # 蓝绿色
+                (3.0, float('inf'), [0.0, 0.0, 1.0])  # 蓝色 (3m+)
+            ]
+            
+            # 为每个点分配颜色
+            colors = []
+            for d in distances:
+                for min_d, max_d, color in color_map:
+                    if min_d <= d < max_d:
+                        colors.append(color)
+                        break
+            
+            # 创建3D图
+            fig = plt.figure(figsize=(10, 8))
             ax = fig.add_subplot(111, projection="3d")
-            ax.scatter(arr[:, 0], arr[:, 1], arr[:, 2], s=1)
+            
+            # 绘制点云，使用不同颜色
+            ax.scatter(
+                arr[:, 0],  # X坐标
+                arr[:, 1],  # Y坐标
+                arr[:, 2],  # Z坐标
+                c=colors,    # 颜色数组
+                s=2,         # 点大小
+                alpha=0.7    # 透明度
+            )
+            
+            # 设置坐标轴标签和标题
             ax.set_xlabel("X (m)")
             ax.set_ylabel("Y (m)")
             ax.set_zlabel("Z (m)")
-            ax.set_title("Point Cloud")
+            ax.set_title("Point Cloud (Color by 0.5m Distance Intervals)")
+            
+            # 添加图例
+            from matplotlib.patches import Patch
+            legend_elements = [
+                Patch(facecolor=color, label=f'{min_d}-{max_d if max_d != float("inf") else "∞"}m')
+                for min_d, max_d, color in color_map
+            ]
+            
+            ax.legend(
+                handles=legend_elements, 
+                loc='upper right',
+                title="Distance Range",
+                bbox_to_anchor=(1.25, 1.0)
+            
+            # 调整视角和布局
+            ax.view_init(elev=25, azim=45)
             plt.tight_layout()
-            plt.savefig("static/photos/point_cloud.jpg", dpi=300)
+            
+            # 保存图片
+            plt.savefig("static/photos/point_cloud.jpg", dpi=300, bbox_inches='tight')
             plt.close(fig)
         except Exception as exc:
             print(f"点云图片保存失败: {exc}")
