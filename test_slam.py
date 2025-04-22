@@ -61,29 +61,51 @@ MAX_EXPLORE_TIME = 300  # 最大探索时间 (秒)
 # ============================================================
 #  SLAM 建图类
 # ============================================================
+import heapq
+import math
+from collections import deque
+
 class SLAMMapper:
-    """SLAM 建图和导航类"""
+    """SLAM 建图和导航类，带路径规划和避障功能"""
     
     def __init__(self):
+        # 地图参数
         self.map = np.zeros((MAP_SIZE, MAP_SIZE), dtype=np.float32)  # 占据网格地图
         self.origin = np.array([MAP_SIZE//2, MAP_SIZE//2])  # 地图原点 (中心)
         self.robot_pose = np.array([0.0, 0.0, 0.0])  # [x, y, theta] (米, 米, 弧度)
+        
+        # 状态标志
         self.exploring = False
+        self.navigating = False
+        self.target_position = None
+        
+        # 线程控制
         self.explore_thread = None
-        self.save_thread = None  # 新增：地图自动保存线程
+        self.navigate_thread = None
+        self.save_thread = None
+        
+        # 数据记录
         self.map_lock = threading.Lock()
         self.path_history = deque(maxlen=1000)  # 路径历史记录
+        self.planned_path = []  # 当前规划路径
         
-        # 创建地图目录
+        # 避障参数
+        self.obstacle_threshold = 0.7  # 占据概率阈值
+        self.safety_distance = 0.3  # 安全距离(米)
+        self.safety_pixels = int(self.safety_distance / MAP_RESOLUTION)
+        
+        # 创建目录
         os.makedirs(MAPS_DIR, exist_ok=True)
-        os.makedirs("static/photos", exist_ok=True)  # 确保图片目录存在
+        os.makedirs("static/photos", exist_ok=True)
     
+    # ---------- 基础地图操作 ----------
     def reset_map(self):
         """重置地图"""
         with self.map_lock:
             self.map.fill(0)
             self.robot_pose = np.array([0.0, 0.0, 0.0])
             self.path_history.clear()
+            self.planned_path = []
     
     def world_to_map(self, world_coords):
         """世界坐标转地图坐标"""
@@ -132,6 +154,240 @@ class SLAMMapper:
         except Exception as e:
             print(f"地图更新错误: {e}")
     
+    # ---------- 路径规划与避障 ----------
+    def is_valid_position(self, map_pos):
+        """检查地图位置是否有效(无碰撞)"""
+        x, y = map_pos
+        if x < 0 or x >= MAP_SIZE or y < 0 or y >= MAP_SIZE:
+            return False
+            
+        # 检查安全区域
+        x_min = max(0, x - self.safety_pixels)
+        x_max = min(MAP_SIZE-1, x + self.safety_pixels)
+        y_min = max(0, y - self.safety_pixels)
+        y_max = min(MAP_SIZE-1, y + self.safety_pixels)
+        
+        # 检查安全区域内是否有障碍物
+        return np.max(self.map[y_min:y_max+1, x_min:x_max+1]) < self.obstacle_threshold
+    
+    def heuristic(self, a, b):
+        """A*启发式函数(欧几里得距离)"""
+        return math.sqrt((a[0]-b[0])**2 + (a[1]-b[1])**2)
+    
+    def a_star_path_planning(self, start_pos, goal_pos):
+        """A*路径规划算法"""
+        start = tuple(self.world_to_map(start_pos))
+        goal = tuple(self.world_to_map(goal_pos))
+        
+        # 优先队列 (f_score, node)
+        open_set = []
+        heapq.heappush(open_set, (0, start))
+        
+        # 路径记录
+        came_from = {}
+        g_score = {start: 0}
+        f_score = {start: self.heuristic(start, goal)}
+        
+        # 邻居方向 (8连通)
+        neighbors = [(1,0), (-1,0), (0,1), (0,-1), 
+                    (1,1), (1,-1), (-1,1), (-1,-1)]
+        
+        while open_set:
+            _, current = heapq.heappop(open_set)
+            
+            if current == goal:
+                # 重建路径
+                path = []
+                while current in came_from:
+                    path.append(current)
+                    current = came_from[current]
+                path.reverse()
+                return [self.map_to_world(np.array(p)) for p in path]
+            
+            for dx, dy in neighbors:
+                neighbor = (current[0]+dx, current[1]+dy)
+                
+                if not self.is_valid_position(neighbor):
+                    continue
+                
+                # 对角线移动成本更高
+                tentative_g = g_score[current] + (1.4 if dx and dy else 1.0)
+                
+                if neighbor not in g_score or tentative_g < g_score[neighbor]:
+                    came_from[neighbor] = current
+                    g_score[neighbor] = tentative_g
+                    f_score[neighbor] = tentative_g + self.heuristic(neighbor, goal)
+                    heapq.heappush(open_set, (f_score[neighbor], neighbor))
+        
+        return None  # 没有找到路径
+    
+    def get_obstacle_direction(self):
+        """检测障碍物方向(简单版本)"""
+        robot_pos = self.world_to_map(self.robot_pose[:2])
+        directions = {
+            'front': (0, 1),
+            'back': (0, -1),
+            'left': (-1, 0),
+            'right': (1, 0)
+        }
+        
+        obstacle_dirs = []
+        for name, (dx, dy) in directions.items():
+            x, y = robot_pos[0] + dx*self.safety_pixels, robot_pos[1] + dy*self.safety_pixels
+            if 0 <= x < MAP_SIZE and 0 <= y < MAP_SIZE and self.map[y, x] >= self.obstacle_threshold:
+                obstacle_dirs.append(name)
+        
+        return obstacle_dirs
+    
+    # ---------- 导航控制 ----------
+    def navigate_to(self, sport_client, target_pos):
+        """导航到指定位置"""
+        if self.navigating:
+            return False
+            
+        self.target_position = target_pos
+        self.navigating = True
+        
+        self.navigate_thread = threading.Thread(
+            target=self._navigate_worker,
+            args=(sport_client,),
+            daemon=True
+        )
+        self.navigate_thread.start()
+        return True
+    
+    def _navigate_worker(self, sport_client):
+        """导航工作线程"""
+        try:
+            while self.navigating and self.target_position is not None:
+                # 计算当前到目标的距离
+                dx = self.target_position[0] - self.robot_pose[0]
+                dy = self.target_position[1] - self.robot_pose[1]
+                distance = math.sqrt(dx**2 + dy**2)
+                
+                # 如果已经很接近目标，停止
+                if distance < 0.3:  # 30cm阈值
+                    sport_client.StopMove()
+                    self.navigating = False
+                    break
+                
+                # 规划路径
+                path = self.a_star_path_planning(self.robot_pose[:2], self.target_position)
+                if not path:
+                    print("无法找到路径到目标位置")
+                    self.navigating = False
+                    break
+                
+                self.planned_path = path
+                
+                # 获取下一个路径点(向前看1米)
+                lookahead_dist = 1.0  # 米
+                next_point = None
+                for point in path:
+                    dist = math.sqrt((point[0]-self.robot_pose[0])**2 + 
+                                   (point[1]-self.robot_pose[1])**2)
+                    if dist >= lookahead_dist:
+                        next_point = point
+                        break
+                
+                if next_point is None:
+                    next_point = path[-1]  # 如果不够远，直接去最后一个点
+                
+                # 计算需要转向的角度
+                target_angle = math.atan2(next_point[1]-self.robot_pose[1], 
+                                         next_point[0]-self.robot_pose[0])
+                angle_diff = (target_angle - self.robot_pose[2] + math.pi) % (2*math.pi) - math.pi
+                
+                # 控制命令
+                speed = min(0.5, distance)  # 最大速度0.5m/s
+                turn_rate = np.clip(angle_diff, -0.5, 0.5)
+                
+                # 避障检查
+                obstacle_dirs = self.get_obstacle_direction()
+                if 'front' in obstacle_dirs and distance < 1.0:
+                    # 前方有障碍且距离较近，减速
+                    speed *= 0.5
+                    if abs(angle_diff) > math.pi/4:  # 角度偏差大时优先转向
+                        speed = 0.1
+                
+                sport_client.Move(speed, 0, turn_rate)
+                time.sleep(0.1)
+                
+        finally:
+            sport_client.StopMove()
+            self.navigating = False
+    
+    # ---------- 探索控制 ----------
+    def explore_environment(self, sport_client, duration=MAX_EXPLORE_TIME):
+        """自动探索环境(带避障)"""
+        if self.exploring:
+            return False
+            
+        self.exploring = True
+        
+        # 启动探索线程
+        self.explore_thread = threading.Thread(
+            target=self._explore_worker, 
+            args=(sport_client, duration),
+            daemon=True
+        )
+        self.explore_thread.start()
+        
+        # 启动自动保存地图线程
+        self.save_thread = threading.Thread(
+            target=self._auto_save_map_worker,
+            daemon=True
+        )
+        self.save_thread.start()
+        
+        return True
+    
+    def _explore_worker(self, sport_client, duration):
+        """探索工作线程(改进版带避障)"""
+        start_time = time.time()
+        last_turn_time = time.time()
+        turn_direction = 1  # 1 for right, -1 for left
+        
+        try:
+            while self.exploring and (time.time() - start_time) < duration:
+                # 检查前方障碍物
+                obstacle_dirs = self.get_obstacle_direction()
+                if 'front' in obstacle_dirs:
+                    # 前方有障碍物，后退并转向
+                    sport_client.Move(-0.2, 0, 0)
+                    time.sleep(0.5)
+                    sport_client.Move(0, 0, 0.5 * turn_direction)
+                    time.sleep(1.0)
+                    turn_direction *= -1  # 下次转向相反方向
+                    last_turn_time = time.time()
+                else:
+                    # 正常前进
+                    sport_client.Move(0.3, 0, 0)
+                
+                # 每隔几秒随机转向
+                if time.time() - last_turn_time > 5.0:
+                    turn_direction *= -1
+                    sport_client.Move(0, 0, 0.3 * turn_direction)
+                    last_turn_time = time.time()
+                    time.sleep(1.0)
+                
+                # 更新位姿 (简化版，实际应该用里程计)
+                self.update_pose(0.05, 0, 0.01 * turn_direction)
+                time.sleep(0.1)
+                
+        finally:
+            sport_client.StopMove()
+            self.exploring = False
+    
+    def stop_exploration(self):
+        """停止探索"""
+        self.exploring = False
+        if self.explore_thread:
+            self.explore_thread.join(timeout=1.0)
+        if hasattr(self, 'save_thread') and self.save_thread:
+            self.save_thread.join(timeout=1.0)
+    
+    # ---------- 地图持久化 ----------
     def save_map(self, filename=None):
         """保存当前地图到文件"""
         if filename is None:
@@ -201,10 +457,22 @@ class SLAMMapper:
                 path_map = self.world_to_map(path[:, :2])
                 for x, y in path_map:
                     colored_map[y, x] = [1.0, 0.0, 0.0, 1.0]  # 红色路径
+            
+            # 添加规划路径
+            if self.planned_path:
+                path = np.array(self.planned_path)
+                path_map = self.world_to_map(path[:, :2])
+                for x, y in path_map:
+                    colored_map[y, x] = [0.0, 1.0, 0.0, 1.0]  # 绿色规划路径
                     
             # 添加机器人当前位置
             robot_pos = self.world_to_map(self.robot_pose[:2])
             cv2.circle(colored_map, (robot_pos[0], robot_pos[1]), 3, (0, 0, 1.0), -1)
+            
+            # 添加目标位置
+            if self.target_position is not None:
+                target_pos = self.world_to_map(self.target_position[:2])
+                cv2.circle(colored_map, (target_pos[0], target_pos[1]), 5, (1.0, 0.0, 1.0), -1)
             
             # 旋转地图使机器人始终朝上
             angle = np.degrees(self.robot_pose[2])
@@ -225,7 +493,7 @@ class SLAMMapper:
     
     def _auto_save_map_worker(self):
         """自动保存地图图片的工作线程"""
-        while self.exploring:
+        while self.exploring or self.navigating:
             try:
                 # 保存当前地图状态
                 self._save_map_image()
@@ -233,65 +501,6 @@ class SLAMMapper:
             except Exception as e:
                 print(f"自动保存地图错误: {e}")
                 time.sleep(1.0)
-    
-    def explore_environment(self, sport_client, duration=MAX_EXPLORE_TIME):
-        """自动探索环境"""
-        if self.exploring:
-            return False
-            
-        self.exploring = True
-        
-        # 启动探索线程
-        self.explore_thread = threading.Thread(
-            target=self._explore_worker, 
-            args=(sport_client, duration),
-            daemon=True
-        )
-        self.explore_thread.start()
-        
-        # 启动自动保存地图线程
-        self.save_thread = threading.Thread(
-            target=self._auto_save_map_worker,
-            daemon=True
-        )
-        self.save_thread.start()
-        
-        return True
-    
-    def _explore_worker(self, sport_client, duration):
-        """探索工作线程"""
-        start_time = time.time()
-        last_turn_time = time.time()
-        turn_direction = 1  # 1 for right, -1 for left
-        
-        try:
-            while self.exploring and (time.time() - start_time) < duration:
-                # 简单探索策略: 前进+随机转向
-                sport_client.Move(0.3, 0, 0)  # 前进
-
-                # 每隔几秒随机转向
-                if time.time() - last_turn_time > 5.0:
-                    turn_direction *= -1
-                    sport_client.Move(0, 0, 0.5 * turn_direction)
-                    last_turn_time = time.time()
-                    time.sleep(1.0)
-                
-                # 更新位姿 (简化版，实际应该用里程计)
-                self.update_pose(0.1, 0, 0.01 * turn_direction)
-                
-                time.sleep(0.1)
-                
-        finally:
-            sport_client.StopMove()
-            self.exploring = False
-    
-    def stop_exploration(self):
-        """停止探索"""
-        self.exploring = False
-        if self.explore_thread:
-            self.explore_thread.join(timeout=1.0)
-        if hasattr(self, 'save_thread') and self.save_thread:
-            self.save_thread.join(timeout=1.0)
 
 
 # ============================================================
