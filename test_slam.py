@@ -70,12 +70,14 @@ class SLAMMapper:
         self.robot_pose = np.array([0.0, 0.0, 0.0])  # [x, y, theta] (米, 米, 弧度)
         self.exploring = False
         self.explore_thread = None
+        self.save_thread = None  # 新增：地图自动保存线程
         self.map_lock = threading.Lock()
         self.path_history = deque(maxlen=1000)  # 路径历史记录
         
         # 创建地图目录
         os.makedirs(MAPS_DIR, exist_ok=True)
-        
+        os.makedirs("static/photos", exist_ok=True)  # 确保图片目录存在
+    
     def reset_map(self):
         """重置地图"""
         with self.map_lock:
@@ -149,12 +151,18 @@ class SLAMMapper:
             with open(filepath, 'wb') as f:
                 pickle.dump(map_data, f)
                 
-            map_img = self.get_map_image()
-            img_path = f"map.jpg"
-            img_path = os.path.join(MAPS_DIR, img_path)
-            cv2.imwrite(img_path, map_img)                
+            # 同时保存地图图片
+            self._save_map_image()
+                
         print(f"地图已保存到 {filepath}")
         return filepath
+    
+    def _save_map_image(self):
+        """内部方法：保存地图图片"""
+        map_img = self.get_map_image()
+        if map_img is not None:
+            img_path = os.path.join("static/photos", "slam_map.jpg")
+            cv2.imwrite(img_path, cv2.cvtColor(map_img, cv2.COLOR_RGBA2BGR))
     
     def load_map(self, filename):
         """从文件加载地图"""
@@ -169,6 +177,9 @@ class SLAMMapper:
                 self.origin = map_data['origin']
                 self.robot_pose = map_data['robot_pose']
                 self.path_history = deque(map_data['path_history'], maxlen=1000)
+                
+            # 加载后立即保存图片
+            self._save_map_image()
                 
             print(f"已加载地图 {filename}")
             return True
@@ -212,18 +223,39 @@ class SLAMMapper:
             # 记录路径
             self.path_history.append(self.robot_pose.copy())
     
+    def _auto_save_map_worker(self):
+        """自动保存地图图片的工作线程"""
+        while self.exploring:
+            try:
+                # 保存当前地图状态
+                self._save_map_image()
+                time.sleep(1.0)  # 每秒保存一次
+            except Exception as e:
+                print(f"自动保存地图错误: {e}")
+                time.sleep(1.0)
+    
     def explore_environment(self, sport_client, duration=MAX_EXPLORE_TIME):
         """自动探索环境"""
         if self.exploring:
             return False
             
         self.exploring = True
+        
+        # 启动探索线程
         self.explore_thread = threading.Thread(
             target=self._explore_worker, 
             args=(sport_client, duration),
             daemon=True
         )
         self.explore_thread.start()
+        
+        # 启动自动保存地图线程
+        self.save_thread = threading.Thread(
+            target=self._auto_save_map_worker,
+            daemon=True
+        )
+        self.save_thread.start()
+        
         return True
     
     def _explore_worker(self, sport_client, duration):
@@ -237,11 +269,6 @@ class SLAMMapper:
                 # 简单探索策略: 前进+随机转向
                 sport_client.Move(0.3, 0, 0)  # 前进
 
-                #if self.obstacle_distance < 0.5:  # 检测到近距离障碍
-                #    sport_client.Move(-0.2, 0, 0)  # 后退
-                #    time.sleep(1)
-                #    sport_client.Move(0, 0, 0.5)  # 转向
-    
                 # 每隔几秒随机转向
                 if time.time() - last_turn_time > 5.0:
                     turn_direction *= -1
@@ -263,7 +290,8 @@ class SLAMMapper:
         self.exploring = False
         if self.explore_thread:
             self.explore_thread.join(timeout=1.0)
-
+        if hasattr(self, 'save_thread') and self.save_thread:
+            self.save_thread.join(timeout=1.0)
 
 
 # ============================================================
